@@ -146,7 +146,7 @@ export default function HolyLiquid() {
   return (
     <div className="hl-root">
 
-      {/* ── UI ISLANDS ── */
+      {/* ── UI ISLANDS ── */}
       <div className="hl-ui">
 
         {/* HEADER */}
