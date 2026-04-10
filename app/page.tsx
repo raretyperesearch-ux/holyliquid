@@ -153,8 +153,18 @@ export default function HolyLiquid() {
   return (
     <div className="hl-root">
 
-      {/* ── UI ISLANDS ── */}
-      <div className="hl-ui">
+      {/* ── FULL WIDTH CHART — absolute, fills entire root ── */}
+      <div style={{
+        position: 'absolute',
+        inset: 0,
+        zIndex: 1,
+        pointerEvents: 'none',
+      }}>
+        <PriceWaterChart priceHistory={priceHistory} pnlPos={pnlPos} />
+      </div>
+
+      {/* ── UI ISLANDS — sit on top of chart ── */}
+      <div className="hl-ui" style={{ position: 'relative', zIndex: 2 }}>
 
         {/* HEADER */}
         <div className="hl-hdr">
@@ -204,10 +214,8 @@ export default function HolyLiquid() {
           </div>
         </div>
 
-        {/* BOAT ZONE — explicit height so canvas getBoundingClientRect works */}
-        <div className="boat-zone" style={{ height: 180, width: '100%', overflow: 'hidden' }}>
-          <PriceWaterChart priceHistory={priceHistory} pnlPos={pnlPos} />
-        </div>
+        {/* boat-zone spacer — keeps flex layout spacing */}
+        <div className="boat-zone" />
 
         {/* BET PANEL */}
         {!authenticated ? (
