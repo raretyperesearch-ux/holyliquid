@@ -296,6 +296,36 @@ export default function HolyLiquid() {
     ? `${round.pair.replace('/USD','')} ${round.direction.toUpperCase()} · ${round.leverage}× · $${Math.round(round.position_size/1000)}k`
     : 'Loading...'
 
+  // Price formatting for the context strip — handles BTC ($60k), ETH ($2k),
+  // SOL ($150) with reasonable decimal places.
+  function fmtPrice(n: number | undefined | null): string {
+    if (n === undefined || n === null || !Number.isFinite(n)) return '---'
+    const abs = Math.abs(n)
+    const digits = abs >= 1000 ? 0 : abs >= 10 ? 2 : 4
+    return '$' + n.toLocaleString('en-US', {
+      minimumFractionDigits: digits,
+      maximumFractionDigits: digits,
+    })
+  }
+
+  const ctxCountdownLabel = phase === 'betting' ? 'LOCK IN'
+    : phase === 'watching' ? 'CLOSES'
+    : phase === 'settled' ? 'RESULT'
+    : phase === 'void' ? 'VOID'
+    : 'LOADING'
+  const ctxCountdownValue = phase === 'settled' ? (round?.result ?? '--')
+    : phase === 'void' ? '—'
+    : phase === 'loading' ? '--'
+    : timerDisplay
+
+  // Profit/loss amount on a settled bet
+  const settleWon = myBet?.won === true
+  const settleProfit = myBet
+    ? (settleWon
+        ? (Number(myBet.actual_winnings ?? myBet.estimated_winnings ?? myBet.amount) - Number(myBet.amount))
+        : -Number(myBet.amount))
+    : 0
+
   const cfmText = betting ? 'Placing...'
     : phase === 'watching' ? 'Waiting For Next Round'
     : phase === 'settled' ? 'Waiting For Next Round'
@@ -381,6 +411,28 @@ export default function HolyLiquid() {
           <span className="pnl-round">Round #{round?.round_number ?? '---'}</span>
         </div>
 
+        {/* CONTEXT STRIP: Entry / Now / Lock-in */}
+        <div className="isl ctx-isl">
+          <div className="ctx-col">
+            <div className="ctx-lbl">Entry</div>
+            <div className="ctx-val">{fmtPrice(round?.open_price)}</div>
+          </div>
+          <div className="ctx-div" />
+          <div className="ctx-col">
+            <div className="ctx-lbl">Now</div>
+            <div className={`ctx-val${round ? (pnlPos ? ' pos' : ' neg') : ''}`}>
+              {fmtPrice(round?.current_price)}
+            </div>
+          </div>
+          <div className="ctx-div" />
+          <div className="ctx-col">
+            <div className="ctx-lbl">{ctxCountdownLabel}</div>
+            <div className={`ctx-val${isFinalCountdown ? ' locking-soon' : ''}`}>
+              {ctxCountdownValue}
+            </div>
+          </div>
+        </div>
+
         {/* ISLAND 3: Timer */}
         <div className="isl timer-isl">
           <div className="ti-row">
@@ -407,6 +459,21 @@ export default function HolyLiquid() {
           <button className="cfm-isl rdy" onClick={login} style={{ letterSpacing: '.2em' }}>
             Connect to Play
           </button>
+        ) : phase === 'settled' && myBet ? (
+          // Settled round with a bet → show a dramatic result card
+          <div className={`isl result-isl ${settleWon ? 'win' : 'loss'}`}>
+            <div className="result-lbl">
+              {settleWon ? '★ You Won' : '✕ You Lost'}
+            </div>
+            <div className="result-amt">
+              {settleWon ? '+' : ''}${fmt(settleProfit)}
+            </div>
+            <div className="result-meta">
+              ${fmt(myBet.amount)} on {myBet.side === 'pos' ? '+PNL' : '−PNL'}
+              {round?.result ? ` · ${round.result}` : ''}
+              {round?.round_number ? ` · Round #${round.round_number}` : ''}
+            </div>
+          </div>
         ) : myBet && phase !== 'settled' ? (
           <div className="isl" style={{ width: '100%', padding: '14px 22px', textAlign: 'center' }}>
             <div style={{ fontSize: 9, letterSpacing: '.3em', color: 'rgba(255,255,255,.3)', textTransform: 'uppercase', marginBottom: 4 }}>Your Bet</div>
