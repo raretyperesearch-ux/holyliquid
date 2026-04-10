@@ -212,8 +212,8 @@ export default function GameCanvas({ waterLevel, onWaterPct, priceHistory }: Pro
         const n = ys.length
         if (n < 2) return
 
-        const pos = chartGeo.attributes.position as THREE.BufferAttribute
-        const lpos = lineGeo.attributes.position as THREE.BufferAttribute
+        const pos = chartGeo.attributes.position as import("three").BufferAttribute
+        const lpos = lineGeo.attributes.position as import("three").BufferAttribute
 
         for (let i = 0; i < N; i++) {
           const dataIdx = Math.floor((i / (N - 1)) * (n - 1))
