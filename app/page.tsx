@@ -46,10 +46,17 @@ export default function HolyLiquid() {
 
   useEffect(() => { if (accessToken) fetchBalance() }, [accessToken, fetchBalance])
 
-  // Track price history for chart
+  // Track price history per pair — reset when asset changes so chart stays consistent
+  const lastPairRef = useRef<string | null>(null)
   useEffect(() => {
-    if (!round?.current_price) return
-    setPriceHistory(prev => [...prev, round.current_price].slice(-60))
+    if (!round?.current_price || !round?.pair) return
+    if (round.pair !== lastPairRef.current) {
+      // New pair — start fresh so ETH/SOL/BTC don't mix price scales
+      lastPairRef.current = round.pair
+      setPriceHistory([round.current_price])
+    } else {
+      setPriceHistory(prev => [...prev, round.current_price].slice(-60))
+    }
   }, [round?.current_price])
 
   useEffect(() => {
@@ -197,8 +204,8 @@ export default function HolyLiquid() {
           </div>
         </div>
 
-        {/* BOAT ZONE — chart */}
-        <div className="boat-zone" style={{ minHeight: 180, width: '100%' }}>
+        {/* BOAT ZONE — explicit height so canvas getBoundingClientRect works */}
+        <div className="boat-zone" style={{ height: 180, width: '100%', overflow: 'hidden' }}>
           <PriceWaterChart priceHistory={priceHistory} pnlPos={pnlPos} />
         </div>
 
