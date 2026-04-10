@@ -57,7 +57,7 @@ export default function HolyLiquid() {
     } else {
       setPriceHistory(prev => [...prev, round.current_price].slice(-60))
     }
-  }, [round?.current_price])
+  }, [round?.current_price, round?.pair])
 
   useEffect(() => {
     if (!round) return
@@ -153,18 +153,32 @@ export default function HolyLiquid() {
   return (
     <div className="hl-root">
 
-      {/* ── FULL WIDTH CHART — absolute, fills entire root ── */}
-      <div style={{
-        position: 'absolute',
-        inset: 0,
-        zIndex: 1,
-        pointerEvents: 'none',
-      }}>
-        <PriceWaterChart priceHistory={priceHistory} pnlPos={pnlPos} />
-      </div>
+      {/* ── SCENE — contains chart + UI in an isolated stacking context ── */}
+      <div
+        className="hl-scene"
+        style={{
+          position: 'relative',
+          width: '100%',
+          minHeight: '100dvh',
+          overflow: 'hidden',
+          isolation: 'isolate',
+        }}
+      >
+        {/* ── CHART LAYER — scene-contained backdrop ── */}
+        <div
+          className="hl-chart-layer"
+          style={{
+            position: 'absolute',
+            inset: 0,
+            zIndex: 0,
+            pointerEvents: 'none',
+          }}
+        >
+          <PriceWaterChart priceHistory={priceHistory} pnlPos={pnlPos} />
+        </div>
 
-      {/* ── UI ISLANDS — sit on top of chart ── */}
-      <div className="hl-ui" style={{ position: 'relative', zIndex: 2 }}>
+        {/* ── UI ISLANDS — sit on top of chart ── */}
+        <div className="hl-ui" style={{ position: 'relative', zIndex: 1 }}>
 
         {/* HEADER */}
         <div className="hl-hdr">
@@ -210,7 +224,7 @@ export default function HolyLiquid() {
             <span className="timer-num">{timerDisplay}</span>
           </div>
           <div className="prog-tr">
-            <div className="prog-f" style={{ width: `${Math.min(100, progressPct)}%`, background: progColor }} />
+            <div className="prog-f" style={{ width: `${Math.max(0, Math.min(100, progressPct))}%`, background: progColor }} />
           </div>
         </div>
 
@@ -270,6 +284,7 @@ export default function HolyLiquid() {
             </button>
           </>
         )}
+        </div>
       </div>
 
       {/* TOAST */}

@@ -18,6 +18,7 @@ export default function PriceWaterChart({ priceHistory, pnlPos }: Props) {
     boatTilt: 0, boatTiltV: 0,
   })
   const animRef = useRef(0)
+  const sizeRef = useRef({ width: 0, height: 0, dpr: 1 })
 
   useEffect(() => {
     stateRef.current.prices = priceHistory.length >= 2 ? priceHistory : [0, 0]
@@ -31,20 +32,39 @@ export default function PriceWaterChart({ priceHistory, pnlPos }: Props) {
   useEffect(() => {
     const cv = canvasRef.current
     if (!cv) return
-    const parent = cv.parentElement!
+    const parent = cv.parentElement
+    if (!parent) return
 
     const applySize = () => {
-      const rect = cv.getBoundingClientRect()
-      if (rect.width === 0 || rect.height === 0) return
-      cv.width  = Math.round(rect.width  * devicePixelRatio)
-      cv.height = Math.round(rect.height * devicePixelRatio)
-      stateRef.current.boatX = rect.width * 0.62
+      const rect = parent.getBoundingClientRect()
+      const width  = Math.max(1, Math.round(rect.width))
+      const height = Math.max(1, Math.round(rect.height))
+      const dpr    = Math.max(1, Math.min(window.devicePixelRatio || 1, 2))
+
+      const nextBufferWidth  = Math.round(width  * dpr)
+      const nextBufferHeight = Math.round(height * dpr)
+
+      if (
+        cv.width  !== nextBufferWidth  ||
+        cv.height !== nextBufferHeight ||
+        sizeRef.current.width  !== width  ||
+        sizeRef.current.height !== height ||
+        sizeRef.current.dpr    !== dpr
+      ) {
+        cv.width  = nextBufferWidth
+        cv.height = nextBufferHeight
+        sizeRef.current = { width, height, dpr }
+
+        // Pin boat X relative to scene, preserve existing Y instead of snapping from stale values
+        stateRef.current.boatX = width * 0.58
+        stateRef.current.boatY = Math.min(stateRef.current.boatY || height * 0.5, height)
+      }
     }
     const resize = () => requestAnimationFrame(applySize)
-    resize()
+    applySize()
     window.addEventListener('resize', resize)
-    const ro = new ResizeObserver(resize)
-    ro.observe(cv)  // observe the canvas itself — most reliable
+    const ro = new ResizeObserver(() => { resize() })
+    ro.observe(parent)  // observe parent layout box — survives canvas buffer resets
 
     const CLOUDS = [
       {x:0,    y:18, w:90,  h:22, spd:.12, alpha:.55},
@@ -61,6 +81,8 @@ export default function PriceWaterChart({ priceHistory, pnlPos }: Props) {
     const RIPPLES: any[] = [], SPRAY: any[] = []
     let lightningFlash = 0, lightningX = 0
     let cloudsInit = false
+    let lastSceneWidth = 0
+    let lastSceneHeight = 0
 
     const lerp = (a: number, b: number, n: number) => a + (b - a) * n
     const SK = 0.045, SD = 0.72
@@ -124,19 +146,28 @@ export default function PriceWaterChart({ priceHistory, pnlPos }: Props) {
       const B = st.pnlBlend
       const chop = lerp(1.85, 1, B)
 
+      const { width: W, height: H, dpr } = sizeRef.current
+      if (!W || !H) return  // not sized yet
+
       const ctx2 = cv!.getContext('2d')!
-      // Always read from canvas buffer — stays in sync with applySize
-      const W = cv!.width  / devicePixelRatio
-      const H = cv!.height / devicePixelRatio
-      if (W === 0 || H === 0) return  // not sized yet
+      ctx2.setTransform(dpr, 0, 0, dpr, 0, 0)
       ctx2.clearRect(0, 0, W, H)
 
-      // Init cloud X positions once
-      if (!cloudsInit) {
+      // Init cloud/drop positions; on resize, rescale proportionally instead of snapping
+      if (!cloudsInit || lastSceneWidth !== W || lastSceneHeight !== H) {
+        if (lastSceneWidth && lastSceneHeight) {
+          const sx = W / lastSceneWidth
+          const sy = H / lastSceneHeight
+          for (const c of CLOUDS) { c.x *= sx; c.y *= sy; c.w *= sx; c.h *= sy }
+          for (const d of DROPS)  { d.x *= sx; d.y *= sy }
+        } else {
+          CLOUDS[0].x = W*.1; CLOUDS[1].x = W*.45; CLOUDS[2].x = W*.78
+          CLOUDS[3].x = W*.25; CLOUDS[4].x = W*.65
+          for (const d of DROPS) { d.x *= W; d.y *= H }
+        }
         cloudsInit = true
-        CLOUDS[0].x = W*.1; CLOUDS[1].x = W*.45; CLOUDS[2].x = W*.78
-        CLOUDS[3].x = W*.25; CLOUDS[4].x = W*.65
-        for (const d of DROPS) { d.x *= W; d.y *= H }
+        lastSceneWidth = W
+        lastSceneHeight = H
       }
 
       const s: number[] = []
@@ -413,10 +444,12 @@ export default function PriceWaterChart({ priceHistory, pnlPos }: Props) {
     <canvas
       ref={canvasRef}
       style={{
+        position: 'absolute',
+        inset: 0,
         display: 'block',
-        width: '100%',       // CSS fills parent width
-        height: '100%',      // CSS fills parent height (parent must have explicit height)
-        verticalAlign: 'top' // prevent inline gap
+        width: '100%',
+        height: '100%',
+        pointerEvents: 'none',
       }}
     />
   )
