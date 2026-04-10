@@ -34,22 +34,17 @@ export default function PriceWaterChart({ priceHistory, pnlPos }: Props) {
     const parent = cv.parentElement!
 
     const applySize = () => {
-      // getBoundingClientRect gets the actual CSS-rendered size — reliable after layout
       const rect = cv.getBoundingClientRect()
-      if (rect.width === 0) return  // not in DOM yet, skip
-      // Set pixel buffer to match rendered size × DPR
-      // Do NOT touch cv.style.width/height — CSS controls display size
+      if (rect.width === 0 || rect.height === 0) return
       cv.width  = Math.round(rect.width  * devicePixelRatio)
       cv.height = Math.round(rect.height * devicePixelRatio)
       stateRef.current.boatX = rect.width * 0.62
     }
-    // rAF defers until after first paint so CSS sizes are settled
     const resize = () => requestAnimationFrame(applySize)
     resize()
     window.addEventListener('resize', resize)
-    // ResizeObserver catches container size changes (orientation, zoom, etc)
     const ro = new ResizeObserver(resize)
-    ro.observe(parent)
+    ro.observe(cv)  // observe the canvas itself — most reliable
 
     const CLOUDS = [
       {x:0,    y:18, w:90,  h:22, spd:.12, alpha:.55},
@@ -411,6 +406,7 @@ export default function PriceWaterChart({ priceHistory, pnlPos }: Props) {
       window.removeEventListener('resize', resize)
       ro.disconnect()
     }
+
   }, [])
 
   return (
