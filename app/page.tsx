@@ -378,10 +378,22 @@ export default function HolyLiquid() {
         {/* HEADER */}
         <div className="hl-hdr">
           <div className="logo-wrap">
-            <div className="lsub">Base Prediction</div>
             <div className="ltxt">HOLYLIQUID</div>
           </div>
-          <div className="isl marquee-pill">LIVE LIQUID ROUND · BASE</div>
+          {!ready ? (
+            <div className="isl account-isl skeleton-account" />
+          ) : !authenticated ? (
+            <button className="isl connect-pill" onClick={login}>Connect</button>
+          ) : (
+            <div className="isl account-isl account-center">
+              <button className="acct-btn deposit" onClick={openDeposit}>Deposit</button>
+              <div className="acct-bal">
+                <div className="bl">Available</div>
+                <div className="bv">{balance !== null ? `$${fmt(balance)}` : '---'}</div>
+              </div>
+              <button className="acct-btn withdraw" onClick={openWithdraw}>Cash Out</button>
+            </div>
+          )}
           <button
             className={`isl sound-pill${soundOn ? ' on' : ''}`}
             type="button"
@@ -390,18 +402,6 @@ export default function HolyLiquid() {
           >
             {soundOn ? 'Sound On' : 'Muted'}
           </button>
-          {!ready ? null : !authenticated ? (
-            <button className="isl connect-pill" onClick={login}>Connect</button>
-          ) : (
-            <div className="isl account-isl">
-              <button className="acct-btn deposit" onClick={openDeposit}>Deposit</button>
-              <div className="acct-bal">
-                <div className="bl">Available</div>
-                <div className="bv">{balance !== null ? `$${fmt(balance)}` : '---'}</div>
-              </div>
-              <button className="acct-btn withdraw" onClick={openWithdraw}>Withdraw</button>
-            </div>
-          )}
         </div>
 
         <div className="stats-row">

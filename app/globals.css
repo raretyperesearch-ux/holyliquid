@@ -99,24 +99,14 @@ html, body, #__next { width: 100%; height: 100%; }
 /* HEADER */
 .hl-hdr {
   display:grid;
-  grid-template-columns: 1fr auto auto;
+  grid-template-columns: auto 1fr auto;
   align-items:center;
   width:100%;
   gap:8px;
 }
-.logo-wrap .lsub { font-size:8px;letter-spacing:.45em;color:rgba(255,255,255,.25);text-transform:uppercase;margin-bottom:2px }
 .logo-wrap .ltxt { font-size:22px;font-weight:900;letter-spacing:.16em;background:linear-gradient(90deg,#fff,rgba(255,255,255,.7));-webkit-background-clip:text;-webkit-text-fill-color:transparent }
-.marquee-pill {
-  justify-self:center;
-  padding:7px 12px;
-  border-radius:999px;
-  font-size:8px;
-  letter-spacing:.24em;
-  color:rgba(230,219,255,.8);
-  text-transform:uppercase;
-  white-space:nowrap;
-}
 .sound-pill {
+  justify-self:end;
   padding:8px 11px;
   border-radius:999px;
   font-size:8px;
@@ -130,7 +120,21 @@ html, body, #__next { width: 100%; height: 100%; }
 .bal-isl { padding:8px 14px;text-align:right }
 .bal-isl .bl { font-size:8px;letter-spacing:.3em;color:rgba(255,255,255,.35);text-transform:uppercase }
 .bal-isl .bv { font-size:14px;font-weight:600;margin-top:1px }
-.connect-pill { padding:8px 14px;font-size:10px;font-weight:700;letter-spacing:.12em;text-transform:uppercase;color:rgba(255,255,255,.7);cursor:pointer;border:none;background:none;border-radius:999px }
+.connect-pill {
+  justify-self:center;
+  width:100%;
+  max-width:218px;
+  padding:8px 14px;
+  font-size:10px;
+  font-weight:700;
+  letter-spacing:.12em;
+  text-transform:uppercase;
+  color:rgba(255,255,255,.7);
+  cursor:pointer;
+  border:none;
+  background:none;
+  border-radius:999px;
+}
 
 /* VALUE ISLAND */
 .stats-row { width:100%; display:grid; grid-template-columns:1.35fr .8fr .65fr; gap:8px; align-items:stretch; }
@@ -243,7 +247,18 @@ html, body, #__next { width: 100%; height: 100%; }
   display:flex;align-items:center;gap:0;
   padding:5px;
   border-radius:15px;
-  justify-self:end;
+}
+.account-center {
+  justify-self:center;
+  width:100%;
+  max-width:228px;
+}
+.skeleton-account {
+  justify-self:center;
+  width:100%;
+  max-width:228px;
+  min-height:42px;
+  opacity:.45;
 }
 .acct-btn {
   background:rgba(255,255,255,.04);
@@ -341,7 +356,9 @@ html, body, #__next { width: 100%; height: 100%; }
   .stats-row { grid-template-columns:1fr; }
   .val-isl, .pnl-isl, .timer-isl { min-height:auto; }
   .hl-hdr { grid-template-columns:1fr auto; }
-  .marquee-pill { grid-column:1 / -1; order:3; width:max-content; justify-self:center; }
+  .logo-wrap { grid-column:1; }
+  .sound-pill { grid-column:2; }
+  .account-center, .connect-pill, .skeleton-account { grid-column:1 / -1; order:3; }
 }
 
 /* ── RESULT CARD (settled bet) ── */
