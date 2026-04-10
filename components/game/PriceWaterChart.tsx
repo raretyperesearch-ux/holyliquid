@@ -85,7 +85,11 @@ export default function PriceWaterChart({ priceHistory, pnlPos }: Props) {
     let lastSceneHeight = 0
 
     const lerp = (a: number, b: number, n: number) => a + (b - a) * n
+    // Boat X spring constants (loose — boat drifts)
     const SK = 0.045, SD = 0.72
+    // Boat Y tracking — tighter so the boat sticks to the line, not bobs free
+    const BOAT_SK_Y = 0.11
+    const BOAT_SD_Y = 0.78
 
     // EMA-smooth a price series. alpha controls responsiveness: lower = calmer.
     function emaSmooth(prices: number[], alpha = 0.18): number[] {
@@ -96,6 +100,19 @@ export default function PriceWaterChart({ priceHistory, pnlPos }: Props) {
         out[i] = out[i - 1] + alpha * (prices[i] - out[i - 1])
       }
       return out
+    }
+
+    // Catmull-Rom cubic interpolation — gives a properly smooth curve between
+    // sample points instead of the piecewise-linear-plus-averaging fallback.
+    function catmullRom(p0: number, p1: number, p2: number, p3: number, t: number): number {
+      const t2 = t * t
+      const t3 = t2 * t
+      return 0.5 * (
+        (2 * p1) +
+        (-p0 + p2) * t +
+        (2 * p0 - 5 * p1 + 4 * p2 - p3) * t2 +
+        (-p0 + 3 * p1 - 3 * p2 + p3) * t3
+      )
     }
 
     // Re-derived on each frame from the latest prices. Keeps a stable reference
@@ -129,18 +146,24 @@ export default function PriceWaterChart({ priceHistory, pnlPos }: Props) {
     }
 
     function getBaseY(x: number, W: number, H: number): number {
-      if (smoothedPrices.length === 0) return H * 0.5
-      const ratio = x / Math.max(1, W - 1)
-      const idx = ratio * (smoothedPrices.length - 1)
-      // 5-point weighted average across the spatial axis for extra smoothness
-      // on top of the temporal EMA. Catches inter-sample aliasing.
-      let v = 0, wt = 0
-      for (let d = -2; d <= 2; d++) {
-        const i = Math.max(0, Math.min(smoothedPrices.length - 1, Math.round(idx + d)))
-        const w = 1 / (Math.abs(d) + 1)
-        v += smoothedPrices[i] * w; wt += w
+      const n = smoothedPrices.length
+      if (n === 0) return H * 0.5
+      if (n === 1) {
+        const v = smoothedPrices[0]
+        const normalized = (v - (smoothedMid - smoothedPaddedRange / 2)) / smoothedPaddedRange
+        const clamped = Math.max(0, Math.min(1, normalized))
+        return H * 0.08 + (H * 0.66) - clamped * (H * 0.66)
       }
-      v /= wt
+      // Catmull-Rom cubic interpolation across the sample grid. Gives a
+      // properly smooth curve — the water literally traces the price line.
+      const ratio = x / Math.max(1, W - 1)
+      const fIdx = ratio * (n - 1)
+      const i1 = Math.max(0, Math.min(n - 1, Math.floor(fIdx)))
+      const t = fIdx - i1
+      const i0 = Math.max(0, i1 - 1)
+      const i2 = Math.min(n - 1, i1 + 1)
+      const i3 = Math.min(n - 1, i1 + 2)
+      const v = catmullRom(smoothedPrices[i0], smoothedPrices[i1], smoothedPrices[i2], smoothedPrices[i3], t)
       // Normalize against the padded range centered on mid — calmer, premium feel.
       const normalized = (v - (smoothedMid - smoothedPaddedRange / 2)) / smoothedPaddedRange
       // Clamp defensively so a noisy single sample can't shoot off-screen.
@@ -150,15 +173,16 @@ export default function PriceWaterChart({ priceHistory, pnlPos }: Props) {
 
     function getY(x: number, chop: number, t: number, W: number, H: number): number {
       const b = getBaseY(x, W, H)
-      // Procedural chop dialed back ~45% vs the original. The water should
-      // whisper on top of the real price curve, not karate-kick over it.
+      // Procedural chop dialed back ~70% from the original. The price line
+      // dominates; the sines just add enough life to feel like water, not
+      // enough to fight the chart reading.
       return b
-        + Math.sin(x * .016 + t * 1.9) * 1.6 * chop
-        + Math.sin(x * .028 - t * 1.4) * 0.95 * chop
-        + Math.sin(x * .055 + t * 2.8) * 0.5
-        + Math.sin(x * .09  - t * 3.5) * 0.28 * chop
-        + Math.sin(x * .15  + t * 5)   * 0.14
-        + Math.sin(x * .24  - t * 6.5) * 0.08 * chop
+        + Math.sin(x * .016 + t * 1.9) * 0.8 * chop
+        + Math.sin(x * .028 - t * 1.4) * 0.5 * chop
+        + Math.sin(x * .055 + t * 2.8) * 0.28
+        + Math.sin(x * .09  - t * 3.5) * 0.15 * chop
+        + Math.sin(x * .15  + t * 5)   * 0.08
+        + Math.sin(x * .24  - t * 6.5) * 0.05 * chop
     }
 
     function drawCloud(ctx: CanvasRenderingContext2D, cx: number, cy: number, cw: number, ch: number, alpha: number, blend: number) {
@@ -328,9 +352,9 @@ export default function PriceWaterChart({ priceHistory, pnlPos }: Props) {
         }
       }
 
-      // Second wave layer — amplitudes dialed back to match getY calming
+      // Second wave layer — subtle rippled offset beneath the main surface
       ctx2.beginPath(); ctx2.moveTo(0,H); ctx2.lineTo(0,s[0]+5)
-      for(let x=1;x<W;x++) ctx2.lineTo(x,s[x]+5+Math.sin(x*.018-t*1.5)*1.9+Math.sin(x*.032+t*1.1)*1.1)
+      for(let x=1;x<W;x++) ctx2.lineTo(x,s[x]+5+Math.sin(x*.018-t*1.5)*1.0+Math.sin(x*.032+t*1.1)*0.55)
       ctx2.lineTo(W,H); ctx2.closePath()
       const l2G=ctx2.createLinearGradient(0,0,0,H*.28)
       l2G.addColorStop(0,B>.5?'rgba(60,150,200,.07)':'rgba(60,70,140,.06)'); l2G.addColorStop(1,'rgba(0,0,0,0)')
@@ -408,7 +432,9 @@ export default function PriceWaterChart({ priceHistory, pnlPos }: Props) {
       st.boatX  += st.boatVX
 
       const xi3=Math.max(0,Math.min(W-1,Math.round(st.boatX)))
-      st.boatVY += -SK*(st.boatY-s[xi3]) - SD*st.boatVY
+      // Stiffer Y spring + higher damping so the boat tracks the price line
+      // instead of bobbing independently above it.
+      st.boatVY += -BOAT_SK_Y*(st.boatY-s[xi3]) - BOAT_SD_Y*st.boatVY
       st.boatY  += st.boatVY
 
       const xL=Math.max(0,xi3-10), xR=Math.min(W-1,xi3+10)
@@ -416,7 +442,8 @@ export default function PriceWaterChart({ priceHistory, pnlPos }: Props) {
       st.boatTiltV += -SK*1.8*(st.boatTilt-rawTilt) - SD*.85*st.boatTiltV
       st.boatTilt  += st.boatTiltV
 
-      const bob=Math.sin(t*1.8)*.9+Math.cos(t*1.1)*.4
+      // Idle bob — halved so the boat looks anchored to the surface, not buoyant
+      const bob=Math.sin(t*1.8)*.45+Math.cos(t*1.1)*.2
 
       // Wake
       for(let i=1;i<12;i++){

@@ -1,9 +1,10 @@
 'use client'
 
-import { useState, useEffect, useRef, useCallback } from 'react'
+import { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import dynamic from 'next/dynamic'
 import { usePrivy } from '@privy-io/react-auth'
 import { useRound } from '@/hooks/useRound'
+import { getSound, type SoundName } from '@/lib/sound'
 
 const PriceWaterChart = dynamic(() => import('@/components/game/PriceWaterChart'), { ssr: false })
 
@@ -14,6 +15,14 @@ function fmt(n: number) {
 }
 
 type ModalKind = null | 'deposit' | 'withdraw'
+
+type MarqueeKind = 'info' | 'warn' | 'win' | 'loss' | 'success'
+interface MarqueeMsg {
+  id: number
+  text: string
+  kind: MarqueeKind
+  ttl: number // auto-dismiss ms; 0 = persistent (base state)
+}
 
 export default function HolyLiquid() {
   const { ready, authenticated, login, getAccessToken, user } = usePrivy()
@@ -40,6 +49,41 @@ export default function HolyLiquid() {
   // Settle flash (shown briefly when a round result lands)
   const [settleFlash, setSettleFlash] = useState<'win' | 'loss' | null>(null)
   const lastSettledIdRef = useRef<string | null>(null)
+
+  // Sound
+  const [soundEnabled, setSoundEnabled] = useState(true)
+  useEffect(() => {
+    // Hydrate from localStorage on the client (avoids SSR mismatch)
+    setSoundEnabled(getSound().isEnabled())
+  }, [])
+  const playSound = useCallback((name: SoundName) => {
+    getSound().play(name)
+  }, [])
+  const toggleSound = useCallback(() => {
+    const next = !getSound().isEnabled()
+    getSound().setEnabled(next)
+    setSoundEnabled(next)
+    if (next) getSound().play('toggle') // audible confirmation on enable
+  }, [])
+
+  // Marquee (top-center floating status popup)
+  const [marqueeOverride, setMarqueeOverride] = useState<MarqueeMsg | null>(null)
+  const marqueeIdRef = useRef(0)
+  const marqueeTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
+  const flashMarquee = useCallback((text: string, kind: MarqueeKind = 'info', ttl = 2500) => {
+    marqueeIdRef.current += 1
+    const msg: MarqueeMsg = { id: marqueeIdRef.current, text, kind, ttl }
+    setMarqueeOverride(msg)
+    if (marqueeTimerRef.current) clearTimeout(marqueeTimerRef.current)
+    if (ttl > 0) {
+      marqueeTimerRef.current = setTimeout(() => setMarqueeOverride(null), ttl)
+    }
+  }, [])
+  useEffect(() => {
+    return () => {
+      if (marqueeTimerRef.current) clearTimeout(marqueeTimerRef.current)
+    }
+  }, [])
 
   useEffect(() => {
     if (authenticated) {
@@ -97,8 +141,15 @@ export default function HolyLiquid() {
 
   async function placeBet() {
     if (!accessToken || !round || !selectedSide) return
-    if (countdown.lock <= 0) return showToast('Betting is closed', '#ff7c98')
-    if (balance !== null && selectedChip > balance) return showToast('Insufficient balance', '#ff7c98')
+    if (countdown.lock <= 0) {
+      playSound('locked')
+      return showToast('Betting is closed', '#ff7c98')
+    }
+    if (balance !== null && selectedChip > balance) {
+      playSound('locked')
+      return showToast('Insufficient balance', '#ff7c98')
+    }
+    playSound('confirm')
     setBetting(true)
     try {
       const res = await fetch('/api/bet', {
@@ -112,13 +163,18 @@ export default function HolyLiquid() {
       const json = await res.json()
       if (json.success) {
         showToast(`Bet placed · $${selectedChip} on ${selectedSide === 'pos' ? '+PNL' : '−PNL'}`, '#7df2a8')
+        flashMarquee(`BET PLACED · $${selectedChip} · ${selectedSide === 'pos' ? '+PNL' : '−PNL'}`, 'success', 2200)
         setBalance(json.data.balance_usdc)
         setSelectedSide(null)
         refetch()
       } else {
+        playSound('locked')
         showToast(json.error || 'Bet failed', '#ff7c98')
       }
-    } catch { showToast('Network error', '#ff7c98') }
+    } catch {
+      playSound('locked')
+      showToast('Network error', '#ff7c98')
+    }
     finally { setBetting(false) }
   }
 
@@ -143,6 +199,7 @@ export default function HolyLiquid() {
     setDepositTxHash('')
     setDepositAmount('')
     setModal('deposit')
+    playSound('modalOpen')
   }
   function openWithdraw() {
     setWithdrawAmount('')
@@ -150,19 +207,23 @@ export default function HolyLiquid() {
     const w = user?.wallet?.address
     setWithdrawTo(w ?? '')
     setModal('withdraw')
+    playSound('modalOpen')
   }
   function closeModal() {
     if (modalBusy) return
     setModal(null)
+    playSound('modalClose')
   }
 
   async function submitDeposit() {
     if (!accessToken) return
     const amt = Number(depositAmount)
     if (!depositTxHash || !depositTxHash.startsWith('0x')) {
+      playSound('locked')
       return showToast('Enter a valid tx hash', '#ff7c98')
     }
     if (!Number.isFinite(amt) || amt <= 0) {
+      playSound('locked')
       return showToast('Enter a valid amount', '#ff7c98')
     }
     setModalBusy(true)
@@ -174,14 +235,20 @@ export default function HolyLiquid() {
       })
       const json = await res.json()
       if (json.success) {
+        playSound('confirm')
         showToast(`Deposited $${fmt(json.data.amount_credited)}`, '#7df2a8')
+        flashMarquee(`DEPOSIT CREDITED · $${fmt(json.data.amount_credited)}`, 'success', 2800)
         // Refetch balance to get consistent available_usdc semantics
         fetchBalance()
         setModal(null)
       } else {
+        playSound('locked')
         showToast(json.error || 'Deposit failed', '#ff7c98')
       }
-    } catch { showToast('Network error', '#ff7c98') }
+    } catch {
+      playSound('locked')
+      showToast('Network error', '#ff7c98')
+    }
     finally { setModalBusy(false) }
   }
 
@@ -189,12 +256,15 @@ export default function HolyLiquid() {
     if (!accessToken) return
     const amt = Number(withdrawAmount)
     if (!Number.isFinite(amt) || amt <= 0) {
+      playSound('locked')
       return showToast('Enter a valid amount', '#ff7c98')
     }
     if (!withdrawTo || !withdrawTo.startsWith('0x')) {
+      playSound('locked')
       return showToast('Enter a destination wallet', '#ff7c98')
     }
     if (balance !== null && amt > balance) {
+      playSound('locked')
       return showToast('Insufficient balance', '#ff7c98')
     }
     setModalBusy(true)
@@ -206,27 +276,45 @@ export default function HolyLiquid() {
       })
       const json = await res.json()
       if (json.success) {
+        playSound('confirm')
         showToast(`Withdrew $${fmt(json.data.amount)}`, '#7df2a8')
+        flashMarquee(`WITHDRAWAL SENT · $${fmt(json.data.amount)}`, 'success', 2800)
         // Refetch balance to get consistent available_usdc semantics
         fetchBalance()
         setModal(null)
       } else {
+        playSound('locked')
         showToast(json.error || 'Withdraw failed', '#ff7c98')
       }
-    } catch { showToast('Network error', '#ff7c98') }
+    } catch {
+      playSound('locked')
+      showToast('Network error', '#ff7c98')
+    }
     finally { setModalBusy(false) }
   }
 
   // When a round settles and the user had a bet, flash the scene green/red
+  // + play win/loss sound + push a marquee message with the result.
   useEffect(() => {
     if (!round || round.status !== 'settled') return
     if (lastSettledIdRef.current === round.id) return
     lastSettledIdRef.current = round.id
     let t: ReturnType<typeof setTimeout> | undefined
-    if (myBet?.won === true)  { setSettleFlash('win');  t = setTimeout(() => setSettleFlash(null), 1300) }
-    if (myBet?.won === false) { setSettleFlash('loss'); t = setTimeout(() => setSettleFlash(null), 1300) }
+    if (myBet?.won === true) {
+      setSettleFlash('win')
+      playSound('win')
+      const profit = Number(myBet.actual_winnings ?? myBet.estimated_winnings ?? myBet.amount) - Number(myBet.amount)
+      flashMarquee(`★ YOU WON +$${fmt(profit)}`, 'win', 3200)
+      t = setTimeout(() => setSettleFlash(null), 1300)
+    }
+    if (myBet?.won === false) {
+      setSettleFlash('loss')
+      playSound('loss')
+      flashMarquee(`✕ YOU LOST $${fmt(Number(myBet.amount))}`, 'loss', 3200)
+      t = setTimeout(() => setSettleFlash(null), 1300)
+    }
     return () => { if (t) clearTimeout(t) }
-  }, [round?.id, round?.status, myBet?.won])
+  }, [round?.id, round?.status, myBet?.won, playSound, flashMarquee])
 
   const isLocked = !round || round.status !== 'open' || countdown.lock <= 0
   const pnlPos   = (round?.pnl_usd ?? 0) >= 0
@@ -326,6 +414,37 @@ export default function HolyLiquid() {
         : -Number(myBet.amount))
     : 0
 
+  // Base marquee — reflects current round lifecycle. Transient events
+  // (deposit credited, bet placed, settle result) override this via
+  // flashMarquee() for ~2-3s then revert to the base.
+  const baseMarquee = useMemo<MarqueeMsg | null>(() => {
+    if (!round) return null
+    if (phase === 'betting') {
+      if (isFinalCountdown) {
+        return { id: -1, text: '⚠ LOCKING SOON · PLACE YOUR BET', kind: 'warn', ttl: 0 }
+      }
+      const asset = round.pair.replace('/USD', '')
+      return {
+        id: -1,
+        text: `● ROUND ${round.round_number} LIVE · ${asset} ${round.direction.toUpperCase()} · ${round.leverage}×`,
+        kind: 'info',
+        ttl: 0,
+      }
+    }
+    if (phase === 'watching') {
+      return { id: -1, text: '● BETS LOCKED · WATCHING THE WATER', kind: 'warn', ttl: 0 }
+    }
+    if (phase === 'settled') {
+      return { id: -1, text: `● ROUND ${round.round_number} ${round.result ?? 'SETTLED'}`, kind: 'info', ttl: 0 }
+    }
+    if (phase === 'void') {
+      return { id: -1, text: '● ROUND VOIDED', kind: 'warn', ttl: 0 }
+    }
+    return null
+  }, [round?.id, round?.round_number, round?.pair, round?.direction, round?.leverage, round?.result, phase, isFinalCountdown])
+
+  const currentMarquee = marqueeOverride ?? baseMarquee
+
   const cfmText = betting ? 'Placing...'
     : phase === 'watching' ? 'Waiting For Next Round'
     : phase === 'settled' ? 'Waiting For Next Round'
@@ -373,19 +492,54 @@ export default function HolyLiquid() {
         {/* HEADER */}
         <div className="hl-hdr">
           <div className="logo-wrap">
-            <div className="lsub">Base Prediction</div>
             <div className="ltxt">HOLYLIQUID</div>
           </div>
-          {!ready ? null : !authenticated ? (
-            <button className="isl connect-pill" onClick={login}>Connect</button>
-          ) : (
-            <div className="isl account-isl">
-              <button className="acct-btn deposit" onClick={openDeposit}>Deposit</button>
-              <div className="acct-bal">
-                <div className="bl">Balance</div>
-                <div className="bv">{balance !== null ? `$${fmt(balance)}` : '---'}</div>
+          <div className="hdr-right">
+            <button
+              className={`sound-toggle${soundEnabled ? ' on' : ''}`}
+              onClick={toggleSound}
+              title={soundEnabled ? 'Mute sounds' : 'Enable sounds'}
+              aria-label={soundEnabled ? 'Mute sounds' : 'Enable sounds'}
+            >
+              {soundEnabled ? (
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" />
+                  <path d="M15.54 8.46a5 5 0 0 1 0 7.07" />
+                  <path d="M19.07 4.93a10 10 0 0 1 0 14.14" />
+                </svg>
+              ) : (
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" />
+                  <line x1="23" y1="9" x2="17" y2="15" />
+                  <line x1="17" y1="9" x2="23" y2="15" />
+                </svg>
+              )}
+            </button>
+            {!ready ? null : !authenticated ? (
+              <button className="isl connect-pill" onClick={login}>Connect</button>
+            ) : (
+              <div className="isl account-isl">
+                <button className="acct-btn deposit" onClick={openDeposit}>Deposit</button>
+                <div className="acct-bal">
+                  <div className="bl">Balance</div>
+                  <div className="bv">{balance !== null ? `$${fmt(balance)}` : '---'}</div>
+                </div>
+                <button className="acct-btn withdraw" onClick={openWithdraw}>Withdraw</button>
               </div>
-              <button className="acct-btn withdraw" onClick={openWithdraw}>Withdraw</button>
+            )}
+          </div>
+        </div>
+
+        {/* ── MARQUEE — floating top-center status pill (reserved slot so
+              appearing/disappearing doesn't shift the rest of the column).
+              Key encodes id + text so base-state transitions also re-animate. ── */}
+        <div className="marquee-slot">
+          {currentMarquee && (
+            <div
+              key={`${currentMarquee.id}:${currentMarquee.text}`}
+              className={`marquee-isl ${currentMarquee.kind}`}
+            >
+              {currentMarquee.text}
             </div>
           )}
         </div>
@@ -488,11 +642,24 @@ export default function HolyLiquid() {
               <div className="ci-lbl">Bet Amount</div>
               <div className="chips-row">
                 {CHIPS.map(c => (
-                  <div key={c} className={`chip${selectedChip === c ? ' sel' : ''}`} onClick={() => setSelectedChip(c)}>
+                  <div
+                    key={c}
+                    className={`chip${selectedChip === c ? ' sel' : ''}`}
+                    onClick={() => { setSelectedChip(c); playSound('chip') }}
+                  >
                     ${c}
                   </div>
                 ))}
-                <div className="chip" style={{ fontSize: 9 }} onClick={() => balance && setSelectedChip(Math.min(Math.floor(balance), 500))}>
+                <div
+                  className="chip"
+                  style={{ fontSize: 9 }}
+                  onClick={() => {
+                    if (balance) {
+                      setSelectedChip(Math.min(Math.floor(balance), 500))
+                      playSound('chip')
+                    }
+                  }}
+                >
                   MAX
                 </div>
               </div>
@@ -503,12 +670,18 @@ export default function HolyLiquid() {
               <button
                 className={`sb sb-pos${selectedSide === 'pos' ? ' on' : ''}${isLocked ? ' sb-locked' : ''}`}
                 disabled={isLocked}
-                onClick={() => setSelectedSide(prev => prev === 'pos' ? null : 'pos')}
+                onClick={() => {
+                  setSelectedSide(prev => prev === 'pos' ? null : 'pos')
+                  playSound('side')
+                }}
               >+PNL</button>
               <button
                 className={`sb sb-neg${selectedSide === 'neg' ? ' on' : ''}${isLocked ? ' sb-locked' : ''}`}
                 disabled={isLocked}
-                onClick={() => setSelectedSide(prev => prev === 'neg' ? null : 'neg')}
+                onClick={() => {
+                  setSelectedSide(prev => prev === 'neg' ? null : 'neg')
+                  playSound('side')
+                }}
               >−PNL</button>
             </div>
 
