@@ -5,7 +5,7 @@ import dynamic from 'next/dynamic'
 import { usePrivy } from '@privy-io/react-auth'
 import { useRound } from '@/hooks/useRound'
 
-const GameCanvas = dynamic(() => import('@/components/game/GameCanvas'), { ssr: false })
+const PriceWaterChart = dynamic(() => import('@/components/game/PriceWaterChart'), { ssr: false })
 
 const CHIPS = [5, 10, 25, 50, 100]
 
@@ -21,9 +21,8 @@ export default function HolyLiquid() {
   const [selectedSide, setSelectedSide] = useState<'pos' | 'neg' | null>(null)
   const [betting, setBetting] = useState(false)
   const [toast, setToast] = useState<{ msg: string; color: string } | null>(null)
-  const [countdown, setCountdown] = useState({ lock: 0, close: 0 })
-  const [waterPct, setWaterPct] = useState(36)
   const [priceHistory, setPriceHistory] = useState<number[]>([])
+  const [countdown, setCountdown] = useState({ lock: 0, close: 0 })
   const toastTimer = useRef<NodeJS.Timeout | undefined>(undefined)
 
   useEffect(() => {
@@ -47,6 +46,12 @@ export default function HolyLiquid() {
 
   useEffect(() => { if (accessToken) fetchBalance() }, [accessToken, fetchBalance])
 
+  // Track price history for chart
+  useEffect(() => {
+    if (!round?.current_price) return
+    setPriceHistory(prev => [...prev, round.current_price].slice(-60))
+  }, [round?.current_price])
+
   useEffect(() => {
     if (!round) return
     const tick = () => {
@@ -60,15 +65,6 @@ export default function HolyLiquid() {
     const id = setInterval(tick, 100)
     return () => clearInterval(id)
   }, [round?.id, round?.betting_closes_at, round?.closes_at])
-
-  // Track price history for chart
-  useEffect(() => {
-    if (!round?.current_price) return
-    setPriceHistory(prev => {
-      const next = [...prev, round.current_price]
-      return next.slice(-60)
-    })
-  }, [round?.current_price])
 
   function showToast(msg: string, color: string) {
     clearTimeout(toastTimer.current)
@@ -86,9 +82,7 @@ export default function HolyLiquid() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${accessToken}` },
         body: JSON.stringify({
-          round_id: round.id,
-          side: selectedSide,
-          amount: selectedChip,
+          round_id: round.id, side: selectedSide, amount: selectedChip,
           idempotency_key: crypto.randomUUID(),
         }),
       })
@@ -101,23 +95,12 @@ export default function HolyLiquid() {
       } else {
         showToast(json.error || 'Bet failed', '#ff7c98')
       }
-    } catch {
-      showToast('Network error', '#ff7c98')
-    } finally {
-      setBetting(false)
-    }
+    } catch { showToast('Network error', '#ff7c98') }
+    finally { setBetting(false) }
   }
 
   const isLocked = !round || round.status !== 'open' || countdown.lock <= 0
-  const pnlUsd = round?.pnl_usd ?? 0
-  const pnlPct = round?.pnl_pct ?? 0
-  const pnlPos = pnlUsd >= 0
-  const currentValue = round?.current_value ?? 347000
-
-  // Water level drives tide: pnl as % of position * leverage
-  const waterLevel = round
-    ? Math.max(-2.5, Math.min(2.8, (pnlUsd / (round.position_size || 1)) * round.leverage * 100 * 0.22))
-    : 0
+  const pnlPos   = (round?.pnl_usd ?? 0) >= 0
 
   const phase = !round ? 'loading'
     : round.status === 'open' && countdown.lock > 0 ? 'betting'
@@ -126,12 +109,15 @@ export default function HolyLiquid() {
     : round.status === 'void' ? 'void'
     : 'loading'
 
-  const timerSec = phase === 'betting' ? Math.ceil(countdown.lock / 1000) : Math.ceil(countdown.close / 1000)
+  const timerSec = phase === 'betting'
+    ? Math.ceil(countdown.lock / 1000)
+    : Math.ceil(countdown.close / 1000)
+
   const timerDisplay = phase === 'settled' ? (round?.result ?? '--')
     : phase === 'void' ? 'VOID'
     : `0:${String(Math.max(0, timerSec)).padStart(2, '0')}`
 
-  const progressWidth = phase === 'betting'
+  const progressPct = phase === 'betting'
     ? (countdown.lock / 10000) * 100
     : (countdown.close / 20000) * 100
 
@@ -143,7 +129,6 @@ export default function HolyLiquid() {
 
   const phaseColor = phase === 'betting' ? '#7df2a8'
     : phase === 'watching' ? '#FFB300'
-    : phase === 'settled' ? (round?.result === '+PNL' ? '#7df2a8' : '#ff7c98')
     : '#ff7c98'
 
   const progColor = phase === 'betting'
@@ -151,7 +136,7 @@ export default function HolyLiquid() {
     : '#FFB300'
 
   const posLabel = round
-    ? `${round.pair.replace('/USD', '')} ${round.direction.toUpperCase()} · ${round.leverage}× · $${Math.round(round.position_size / 1000)}k`
+    ? `${round.pair.replace('/USD','')} ${round.direction.toUpperCase()} · ${round.leverage}× · $${Math.round(round.position_size/1000)}k`
     : 'Loading...'
 
   const cfmText = betting ? 'Placing...'
@@ -161,26 +146,12 @@ export default function HolyLiquid() {
   return (
     <div className="hl-root">
 
-      {/* Three.js canvas */}
-      <GameCanvas waterLevel={waterLevel} onWaterPct={setWaterPct} priceHistory={priceHistory} />
-
-      {/* CSS Water */}
-      <div className="hl-water" style={{ height: `${waterPct}%` }}>
-        <div className="ww">
-          <svg className="w1" viewBox="0 0 1200 160" preserveAspectRatio="none">
-            <path d="M0,54 C100,20 180,86 280,50 C360,22 460,88 560,46 C640,14 760,86 860,50 C980,18 1080,84 1200,48 L1200,160 L0,160 Z" fill="rgba(186,226,255,0.58)"/>
-          </svg>
-          <svg className="w2" viewBox="0 0 1200 170" preserveAspectRatio="none">
-            <path d="M0,62 C120,32 190,94 320,58 C420,30 510,100 650,60 C780,22 900,92 1040,54 C1110,32 1160,56 1200,58 L1200,170 L0,170 Z" fill="rgba(114,154,255,0.48)"/>
-          </svg>
-          <svg className="w3" viewBox="0 0 1200 160" preserveAspectRatio="none">
-            <path d="M0,48 C90,10 220,82 330,44 C430,16 550,88 660,48 C800,6 920,88 1040,50 C1120,24 1170,50 1200,46 L1200,160 L0,160 Z" fill="rgba(80,88,255,0.38)"/>
-          </svg>
-        </div>
-        <div className="water-body" />
+      {/* ── BOAT ZONE — 2D canvas water chart ── */}
+      <div style={{ position: 'absolute', inset: 0, zIndex: 0 }}>
+        <PriceWaterChart priceHistory={priceHistory} pnlPos={pnlPos} />
       </div>
 
-      {/* UI Islands */}
+      {/* ── UI ISLANDS ── */}
       <div className="hl-ui">
 
         {/* HEADER */}
@@ -203,18 +174,18 @@ export default function HolyLiquid() {
         <div className="isl val-isl">
           <div className="vi-lbl">{posLabel}</div>
           <div className={`big-val ${pnlPos ? 'pos' : 'neg'}`}>
-            ${Math.round(currentValue).toLocaleString()}
+            ${round ? Math.round(round.current_value).toLocaleString() : '---'}
           </div>
         </div>
 
         {/* ISLAND 2: PnL */}
         <div className="isl pnl-isl">
           <span className="pnl-chg" style={{ color: pnlPos ? '#7df2a8' : '#ff7c98' }}>
-            {pnlPos ? '+' : ''}${Math.abs(pnlUsd).toFixed(2)}
+            {pnlPos ? '+' : ''}${Math.abs(round?.pnl_usd ?? 0).toFixed(2)}
           </span>
           <div className="pnl-div" />
           <span className="pnl-pct">
-            {pnlPos ? '+' : ''}{pnlPct.toFixed(2)}%
+            {pnlPos ? '+' : ''}{(round?.pnl_pct ?? 0).toFixed(2)}%
           </span>
           <div className="pnl-div" />
           <span className="pnl-round">Round #{round?.round_number ?? '---'}</span>
@@ -227,14 +198,14 @@ export default function HolyLiquid() {
             <span className="timer-num">{timerDisplay}</span>
           </div>
           <div className="prog-tr">
-            <div className="prog-f" style={{ width: `${Math.min(100, progressWidth)}%`, background: progColor }} />
+            <div className="prog-f" style={{ width: `${Math.min(100, progressPct)}%`, background: progColor }} />
           </div>
         </div>
 
-        {/* Boat visible here */}
+        {/* BOAT ZONE — chart lives here */}
         <div className="boat-zone" />
 
-        {/* Bet panel — only show if authenticated */}
+        {/* BET PANEL */}
         {!authenticated ? (
           <button className="cfm-isl rdy" onClick={login} style={{ letterSpacing: '.2em' }}>
             Connect to Play
@@ -253,40 +224,28 @@ export default function HolyLiquid() {
               <div className="ci-lbl">Bet Amount</div>
               <div className="chips-row">
                 {CHIPS.map(c => (
-                  <div
-                    key={c}
-                    className={`chip${selectedChip === c ? ' sel' : ''}`}
-                    onClick={() => setSelectedChip(c)}
-                  >
+                  <div key={c} className={`chip${selectedChip === c ? ' sel' : ''}`} onClick={() => setSelectedChip(c)}>
                     ${c}
                   </div>
                 ))}
-                <div
-                  className="chip"
-                  style={{ fontSize: 9 }}
-                  onClick={() => balance && setSelectedChip(Math.min(Math.floor(balance), 500))}
-                >
+                <div className="chip" style={{ fontSize: 9 }} onClick={() => balance && setSelectedChip(Math.min(Math.floor(balance), 500))}>
                   MAX
                 </div>
               </div>
             </div>
 
-            {/* ISLANDS 5a & 5b: +PNL / -PNL */}
+            {/* ISLANDS 5a & 5b */}
             <div className="btns-row">
               <button
                 className={`sb sb-pos${selectedSide === 'pos' ? ' on' : ''}`}
                 disabled={isLocked}
                 onClick={() => setSelectedSide(prev => prev === 'pos' ? null : 'pos')}
-              >
-                +PNL
-              </button>
+              >+PNL</button>
               <button
                 className={`sb sb-neg${selectedSide === 'neg' ? ' on' : ''}`}
                 disabled={isLocked}
                 onClick={() => setSelectedSide(prev => prev === 'neg' ? null : 'neg')}
-              >
-                −PNL
-              </button>
+              >−PNL</button>
             </div>
 
             {/* ISLAND 6: Confirm */}
@@ -299,10 +258,9 @@ export default function HolyLiquid() {
             </button>
           </>
         )}
-
       </div>
 
-      {/* Toast */}
+      {/* TOAST */}
       {toast && (
         <div className="hl-toast" style={{ color: toast.color, borderColor: toast.color + '44' }}>
           {toast.msg}
