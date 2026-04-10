@@ -4,11 +4,11 @@ import { createServerSupabase } from '@/lib/supabase/server'
 
 export async function GET(
   req: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
+    const { id } = await params
     const sb = createServerSupabase()
-    const { id } = params
 
     const { data: round, error } = await sb
       .from('hl_rounds')
