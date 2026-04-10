@@ -1,0 +1,4 @@
+avantis-trader-sdk
+fastapi
+uvicorn[standard]
+python-dotenv
