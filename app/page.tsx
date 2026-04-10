@@ -1,24 +1,28 @@
 'use client'
 
 import { useState, useEffect, useRef, useCallback } from 'react'
+import dynamic from 'next/dynamic'
 import { usePrivy } from '@privy-io/react-auth'
 import { useRound } from '@/hooks/useRound'
 
+const GameCanvas = dynamic(() => import('@/components/game/GameCanvas'), { ssr: false })
+
 const CHIPS = [5, 10, 25, 50, 100]
 
-function fmt(n: number, decimals = 2) {
-  return n.toLocaleString('en-US', { maximumFractionDigits: decimals })
+function fmt(n: number) {
+  return n.toLocaleString('en-US', { maximumFractionDigits: 2 })
 }
 
-export default function GamePage() {
+export default function HolyLiquid() {
   const { ready, authenticated, login, getAccessToken, user } = usePrivy()
   const [accessToken, setAccessToken] = useState<string | null>(null)
   const [balance, setBalance] = useState<number | null>(null)
   const [selectedChip, setSelectedChip] = useState(10)
   const [selectedSide, setSelectedSide] = useState<'pos' | 'neg' | null>(null)
   const [betting, setBetting] = useState(false)
-  const [toast, setToast] = useState<{ msg: string; type: 'pos' | 'neg' | 'info' } | null>(null)
+  const [toast, setToast] = useState<{ msg: string; color: string } | null>(null)
   const [countdown, setCountdown] = useState({ lock: 0, close: 0 })
+  const [waterPct, setWaterPct] = useState(36)
   const toastTimer = useRef<NodeJS.Timeout | undefined>(undefined)
 
   useEffect(() => {
@@ -56,36 +60,54 @@ export default function GamePage() {
     return () => clearInterval(id)
   }, [round?.id, round?.betting_closes_at, round?.closes_at])
 
-  function showToast(msg: string, type: 'pos' | 'neg' | 'info' = 'info') {
+  function showToast(msg: string, color: string) {
     clearTimeout(toastTimer.current)
-    setToast({ msg, type })
+    setToast({ msg, color })
     toastTimer.current = setTimeout(() => setToast(null), 3000)
   }
 
   async function placeBet() {
     if (!accessToken || !round || !selectedSide) return
-    if (countdown.lock <= 0) return showToast('Betting is closed', 'neg')
-    if (balance !== null && selectedChip > balance) return showToast('Insufficient balance', 'neg')
+    if (countdown.lock <= 0) return showToast('Betting is closed', '#ff7c98')
+    if (balance !== null && selectedChip > balance) return showToast('Insufficient balance', '#ff7c98')
     setBetting(true)
     try {
       const res = await fetch('/api/bet', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${accessToken}` },
-        body: JSON.stringify({ round_id: round.id, side: selectedSide, amount: selectedChip, idempotency_key: crypto.randomUUID() }),
+        body: JSON.stringify({
+          round_id: round.id,
+          side: selectedSide,
+          amount: selectedChip,
+          idempotency_key: crypto.randomUUID(),
+        }),
       })
       const json = await res.json()
       if (json.success) {
-        showToast(`Bet placed · $${selectedChip} on ${selectedSide === 'pos' ? '+PNL' : '-PNL'}`, 'pos')
+        showToast(`Bet placed · $${selectedChip} on ${selectedSide === 'pos' ? '+PNL' : '−PNL'}`, '#7df2a8')
         setBalance(json.data.balance_usdc)
         setSelectedSide(null)
         refetch()
-      } else { showToast(json.error || 'Bet failed', 'neg') }
-    } catch { showToast('Network error', 'neg') }
-    finally { setBetting(false) }
+      } else {
+        showToast(json.error || 'Bet failed', '#ff7c98')
+      }
+    } catch {
+      showToast('Network error', '#ff7c98')
+    } finally {
+      setBetting(false)
+    }
   }
 
   const isLocked = !round || round.status !== 'open' || countdown.lock <= 0
-  const pnlPos = (round?.pnl_usd ?? 0) >= 0
+  const pnlUsd = round?.pnl_usd ?? 0
+  const pnlPct = round?.pnl_pct ?? 0
+  const pnlPos = pnlUsd >= 0
+  const currentValue = round?.current_value ?? 347000
+
+  // Water level drives tide: pnl as % of position * leverage
+  const waterLevel = round
+    ? Math.max(-2.5, Math.min(2.8, (pnlUsd / (round.position_size || 1)) * round.leverage * 100 * 0.22))
+    : 0
 
   const phase = !round ? 'loading'
     : round.status === 'open' && countdown.lock > 0 ? 'betting'
@@ -94,150 +116,186 @@ export default function GamePage() {
     : round.status === 'void' ? 'void'
     : 'loading'
 
-  const timerSec = phase === 'betting' ? Math.ceil(countdown.lock / 1000)
-    : Math.ceil(countdown.close / 1000)
+  const timerSec = phase === 'betting' ? Math.ceil(countdown.lock / 1000) : Math.ceil(countdown.close / 1000)
   const timerDisplay = phase === 'settled' ? (round?.result ?? '--')
     : phase === 'void' ? 'VOID'
-    : `0:${String(timerSec).padStart(2, '0')}`
+    : `0:${String(Math.max(0, timerSec)).padStart(2, '0')}`
 
-  const progressPct = phase === 'betting'
+  const progressWidth = phase === 'betting'
     ? (countdown.lock / 10000) * 100
     : (countdown.close / 20000) * 100
 
+  const phaseLabel = phase === 'betting' ? '● BETTING OPEN'
+    : phase === 'watching' ? '● BETS LOCKED'
+    : phase === 'settled' ? `● ${round?.result ?? 'SETTLED'}`
+    : phase === 'void' ? '● VOID'
+    : '● LOADING'
+
+  const phaseColor = phase === 'betting' ? '#7df2a8'
+    : phase === 'watching' ? '#FFB300'
+    : phase === 'settled' ? (round?.result === '+PNL' ? '#7df2a8' : '#ff7c98')
+    : '#ff7c98'
+
+  const progColor = phase === 'betting'
+    ? 'linear-gradient(90deg,#1A1AFF,#7B2CFF,#9A7BFF)'
+    : '#FFB300'
+
+  const posLabel = round
+    ? `${round.pair.replace('/USD', '')} ${round.direction.toUpperCase()} · ${round.leverage}× · $${Math.round(round.position_size / 1000)}k`
+    : 'Loading...'
+
+  const cfmText = betting ? 'Placing...'
+    : !selectedSide ? 'Confirm Bet'
+    : `${selectedSide === 'pos' ? '+PNL' : '−PNL'} · $${selectedChip} · Confirm`
+
   return (
-    <div style={{ minHeight: '100vh', background: '#000', color: '#fff', fontFamily: 'var(--font-body)', display: 'flex', flexDirection: 'column', maxWidth: 480, margin: '0 auto', padding: '24px 16px' }}>
+    <div className="hl-root">
 
-      {/* TOP BAR */}
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 28 }}>
-        <div>
-          <div style={{ fontSize: '0.65rem', letterSpacing: '0.2em', color: '#555', marginBottom: 4, fontWeight: 500 }}>BASE PREDICTION</div>
-          <div style={{ fontFamily: 'var(--font-display)', fontSize: '1.4rem', fontWeight: 700, letterSpacing: '0.08em' }}>HOLYLIQUID</div>
+      {/* Three.js canvas */}
+      <GameCanvas waterLevel={waterLevel} onWaterPct={setWaterPct} />
+
+      {/* CSS Water */}
+      <div className="hl-water" style={{ height: `${waterPct}%` }}>
+        <div className="ww">
+          <svg className="w1" viewBox="0 0 1200 160" preserveAspectRatio="none">
+            <path d="M0,54 C100,20 180,86 280,50 C360,22 460,88 560,46 C640,14 760,86 860,50 C980,18 1080,84 1200,48 L1200,160 L0,160 Z" fill="rgba(186,226,255,0.58)"/>
+          </svg>
+          <svg className="w2" viewBox="0 0 1200 170" preserveAspectRatio="none">
+            <path d="M0,62 C120,32 190,94 320,58 C420,30 510,100 650,60 C780,22 900,92 1040,54 C1110,32 1160,56 1200,58 L1200,170 L0,170 Z" fill="rgba(114,154,255,0.48)"/>
+          </svg>
+          <svg className="w3" viewBox="0 0 1200 160" preserveAspectRatio="none">
+            <path d="M0,48 C90,10 220,82 330,44 C430,16 550,88 660,48 C800,6 920,88 1040,50 C1120,24 1170,50 1200,46 L1200,160 L0,160 Z" fill="rgba(80,88,255,0.38)"/>
+          </svg>
         </div>
-        {!ready ? null : !authenticated ? (
-          <button onClick={login} style={{ background: 'rgba(255,255,255,0.08)', border: '1px solid rgba(255,255,255,0.12)', borderRadius: 100, padding: '10px 18px', color: '#fff', fontSize: '0.8rem', fontWeight: 600, cursor: 'pointer', letterSpacing: '0.05em' }}>
-            CONNECT
+        <div className="water-body" />
+      </div>
+
+      {/* UI Islands */}
+      <div className="hl-ui">
+
+        {/* HEADER */}
+        <div className="hl-hdr">
+          <div className="logo-wrap">
+            <div className="lsub">Base Prediction</div>
+            <div className="ltxt">HOLYLIQUID</div>
+          </div>
+          {!ready ? null : !authenticated ? (
+            <button className="isl connect-pill" onClick={login}>Connect</button>
+          ) : (
+            <div className="isl bal-isl">
+              <div className="bl">Balance</div>
+              <div className="bv">{balance !== null ? `$${fmt(balance)}` : '---'}</div>
+            </div>
+          )}
+        </div>
+
+        {/* ISLAND 1: Position Value */}
+        <div className="isl val-isl">
+          <div className="vi-lbl">{posLabel}</div>
+          <div className={`big-val ${pnlPos ? 'pos' : 'neg'}`}>
+            ${Math.round(currentValue).toLocaleString()}
+          </div>
+        </div>
+
+        {/* ISLAND 2: PnL */}
+        <div className="isl pnl-isl">
+          <span className="pnl-chg" style={{ color: pnlPos ? '#7df2a8' : '#ff7c98' }}>
+            {pnlPos ? '+' : ''}${Math.abs(pnlUsd).toFixed(2)}
+          </span>
+          <div className="pnl-div" />
+          <span className="pnl-pct">
+            {pnlPos ? '+' : ''}{pnlPct.toFixed(2)}%
+          </span>
+          <div className="pnl-div" />
+          <span className="pnl-round">Round #{round?.round_number ?? '---'}</span>
+        </div>
+
+        {/* ISLAND 3: Timer */}
+        <div className="isl timer-isl">
+          <div className="ti-row">
+            <span className="phase-lbl" style={{ color: phaseColor }}>{phaseLabel}</span>
+            <span className="timer-num">{timerDisplay}</span>
+          </div>
+          <div className="prog-tr">
+            <div className="prog-f" style={{ width: `${Math.min(100, progressWidth)}%`, background: progColor }} />
+          </div>
+        </div>
+
+        {/* Boat visible here */}
+        <div className="boat-zone" />
+
+        {/* Bet panel — only show if authenticated */}
+        {!authenticated ? (
+          <button className="cfm-isl rdy" onClick={login} style={{ letterSpacing: '.2em' }}>
+            Connect to Play
           </button>
-        ) : (
-          <div style={{ background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 100, padding: '10px 20px', textAlign: 'right' }}>
-            <div style={{ fontSize: '0.6rem', letterSpacing: '0.15em', color: '#555', marginBottom: 2 }}>BALANCE</div>
-            <div style={{ fontFamily: 'var(--font-display)', fontSize: '1rem', fontWeight: 700 }}>${balance !== null ? fmt(balance) : '---'}</div>
-          </div>
-        )}
-      </div>
-
-      {/* POSITION CARD */}
-      <div style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: 20, padding: '28px 24px', marginBottom: 10 }}>
-        {round ? (
-          <>
-            <div style={{ fontSize: '0.7rem', letterSpacing: '0.15em', color: '#555', marginBottom: 16, fontWeight: 500 }}>
-              {round.pair.replace('/USD', '')} {round.direction.toUpperCase()} · {round.leverage}x · ${Math.round(round.position_size / 1000)}K
+        ) : myBet && phase !== 'settled' ? (
+          <div className="isl" style={{ width: '100%', padding: '14px 22px', textAlign: 'center' }}>
+            <div style={{ fontSize: 9, letterSpacing: '.3em', color: 'rgba(255,255,255,.3)', textTransform: 'uppercase', marginBottom: 4 }}>Your Bet</div>
+            <div style={{ fontSize: 16, fontWeight: 700, color: myBet.side === 'pos' ? '#7df2a8' : '#ff7c98' }}>
+              ${myBet.amount} on {myBet.side === 'pos' ? '+PNL' : '−PNL'} · Est. ${fmt(myBet.estimated_winnings)}
             </div>
-            <div style={{ fontFamily: 'var(--font-display)', fontSize: 'clamp(2.8rem, 10vw, 4.5rem)', fontWeight: 700, color: pnlPos ? '#4eff91' : '#ff4e6a', lineHeight: 1, marginBottom: 8, letterSpacing: '-0.02em' }}>
-              ${Math.round(round.current_value).toLocaleString()}
-            </div>
-            {phase === 'settled' && round.result && (
-              <div style={{ display: 'inline-block', padding: '4px 14px', borderRadius: 8, background: round.result === '+PNL' ? 'rgba(78,255,145,0.15)' : 'rgba(255,78,106,0.15)', color: round.result === '+PNL' ? '#4eff91' : '#ff4e6a', fontFamily: 'var(--font-display)', fontSize: '0.85rem', fontWeight: 700 }}>
-                {round.result}
-              </div>
-            )}
-          </>
-        ) : (
-          <div style={{ fontFamily: 'var(--font-display)', fontSize: '2rem', color: 'rgba(255,255,255,0.15)', height: 80, display: 'flex', alignItems: 'center' }}>Loading...</div>
-        )}
-      </div>
-
-      {/* STATS PILL */}
-      {round && (
-        <div style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.06)', borderRadius: 100, padding: '10px 20px', marginBottom: 10, display: 'flex', alignItems: 'center', gap: 12 }}>
-          <span style={{ fontFamily: 'var(--font-display)', fontSize: '0.85rem', fontWeight: 600, color: pnlPos ? '#4eff91' : '#ff4e6a' }}>
-            {pnlPos ? '+' : ''}${fmt(Math.abs(round.pnl_usd), 0)}
-          </span>
-          <span style={{ color: 'rgba(255,255,255,0.12)' }}>|</span>
-          <span style={{ fontFamily: 'var(--font-display)', fontSize: '0.8rem', color: pnlPos ? '#4eff91' : '#ff4e6a' }}>
-            {pnlPos ? '+' : ''}{round.pnl_pct.toFixed(2)}%
-          </span>
-          <span style={{ color: 'rgba(255,255,255,0.12)' }}>|</span>
-          <span style={{ fontSize: '0.72rem', color: '#444', letterSpacing: '0.05em', fontWeight: 500 }}>ROUND #{round.round_number}</span>
-        </div>
-      )}
-
-      {/* STATUS + TIMER */}
-      <div style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.06)', borderRadius: 14, padding: '14px 18px', marginBottom: 24 }}>
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            <div style={{ width: 8, height: 8, borderRadius: '50%', background: phase === 'betting' ? '#4eff91' : phase === 'watching' ? '#facc15' : '#444', boxShadow: phase === 'betting' ? '0 0 8px #4eff91' : 'none' }} />
-            <span style={{ fontSize: '0.72rem', fontWeight: 600, letterSpacing: '0.12em', color: '#888' }}>
-              {phase === 'betting' ? 'BETTING OPEN' : phase === 'watching' ? 'BETS LOCKED' : phase === 'settled' ? 'SETTLED' : phase === 'void' ? 'VOID · REFUNDED' : 'LOADING'}
-            </span>
-          </div>
-          <span style={{ fontFamily: 'var(--font-display)', fontSize: '1.1rem', fontWeight: 700 }}>{timerDisplay}</span>
-        </div>
-        <div style={{ height: 4, background: 'rgba(255,255,255,0.07)', borderRadius: 2, overflow: 'hidden' }}>
-          <div style={{ height: '100%', borderRadius: 2, width: `${Math.min(100, progressPct)}%`, background: phase === 'betting' ? 'linear-gradient(90deg, #1A1AFF, #7B2CFF)' : '#facc15', transition: 'width 0.3s linear' }} />
-        </div>
-        {round && (round.pos_pool > 0 || round.neg_pool > 0) && (
-          <div style={{ display: 'flex', gap: 16, marginTop: 10 }}>
-            <span style={{ fontSize: '0.7rem', color: '#4eff91' }}>+PNL ${fmt(round.pos_pool)}</span>
-            <span style={{ fontSize: '0.7rem', color: '#ff4e6a' }}>-PNL ${fmt(round.neg_pool)}</span>
-          </div>
-        )}
-      </div>
-
-      {/* BET PANEL */}
-      {authenticated ? (
-        myBet && phase !== 'settled' ? (
-          <div style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: 20, padding: 24, textAlign: 'center' }}>
-            <div style={{ fontSize: '0.65rem', letterSpacing: '0.18em', color: '#555', marginBottom: 8 }}>YOUR BET</div>
-            <div style={{ fontFamily: 'var(--font-display)', fontSize: '1.2rem', fontWeight: 700, color: myBet.side === 'pos' ? '#4eff91' : '#ff4e6a' }}>
-              ${myBet.amount} on {myBet.side === 'pos' ? '+PNL' : '-PNL'}
-            </div>
-            <div style={{ fontSize: '0.75rem', color: '#444', marginTop: 6 }}>Est. return: ${fmt(myBet.estimated_winnings)}</div>
           </div>
         ) : (
           <>
-            <div style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.06)', borderRadius: 20, padding: 20, marginBottom: 12 }}>
-              <div style={{ fontSize: '0.65rem', letterSpacing: '0.18em', color: '#444', marginBottom: 14, fontWeight: 500 }}>BET AMOUNT</div>
-              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+            {/* ISLAND 4: Chips */}
+            <div className="isl chips-isl">
+              <div className="ci-lbl">Bet Amount</div>
+              <div className="chips-row">
                 {CHIPS.map(c => (
-                  <button key={c} onClick={() => setSelectedChip(c)} style={{ width: 56, height: 56, borderRadius: '50%', background: selectedChip === c ? '#7B2CFF' : 'rgba(255,255,255,0.07)', border: `2px solid ${selectedChip === c ? '#7B2CFF' : 'rgba(255,255,255,0.1)'}`, color: '#fff', fontFamily: 'var(--font-display)', fontSize: '0.8rem', fontWeight: 700, cursor: 'pointer', boxShadow: selectedChip === c ? '0 0 20px rgba(123,44,255,0.5)' : 'none', transition: 'all 0.15s' }}>
+                  <div
+                    key={c}
+                    className={`chip${selectedChip === c ? ' sel' : ''}`}
+                    onClick={() => setSelectedChip(c)}
+                  >
                     ${c}
-                  </button>
+                  </div>
                 ))}
-                <button onClick={() => balance && setSelectedChip(Math.min(Math.floor(balance), 500))} style={{ width: 56, height: 56, borderRadius: '50%', background: 'rgba(255,255,255,0.07)', border: '2px solid rgba(255,255,255,0.1)', color: '#fff', fontFamily: 'var(--font-display)', fontSize: '0.75rem', fontWeight: 700, cursor: 'pointer' }}>
+                <div
+                  className="chip"
+                  style={{ fontSize: 9 }}
+                  onClick={() => balance && setSelectedChip(Math.min(Math.floor(balance), 500))}
+                >
                   MAX
-                </button>
+                </div>
               </div>
             </div>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 10 }}>
-              {(['pos', 'neg'] as const).map(side => (
-                <button key={side} onClick={() => setSelectedSide(selectedSide === side ? null : side)} disabled={isLocked} style={{ padding: 18, borderRadius: 14, background: selectedSide === side ? (side === 'pos' ? 'rgba(78,255,145,0.12)' : 'rgba(255,78,106,0.12)') : 'rgba(255,255,255,0.04)', border: `2px solid ${selectedSide === side ? (side === 'pos' ? '#4eff91' : '#ff4e6a') : 'rgba(255,255,255,0.1)'}`, color: side === 'pos' ? '#4eff91' : '#ff4e6a', fontFamily: 'var(--font-display)', fontSize: '1rem', fontWeight: 700, letterSpacing: '0.05em', cursor: isLocked ? 'not-allowed' : 'pointer', opacity: isLocked ? 0.35 : 1, transition: 'all 0.15s' }}>
-                  {side === 'pos' ? '+PNL' : '−PNL'}
-                </button>
-              ))}
+
+            {/* ISLANDS 5a & 5b: +PNL / -PNL */}
+            <div className="btns-row">
+              <button
+                className={`sb sb-pos${selectedSide === 'pos' ? ' on' : ''}`}
+                disabled={isLocked}
+                onClick={() => setSelectedSide(prev => prev === 'pos' ? null : 'pos')}
+              >
+                +PNL
+              </button>
+              <button
+                className={`sb sb-neg${selectedSide === 'neg' ? ' on' : ''}`}
+                disabled={isLocked}
+                onClick={() => setSelectedSide(prev => prev === 'neg' ? null : 'neg')}
+              >
+                −PNL
+              </button>
             </div>
-            <button disabled={!selectedSide || isLocked || betting} onClick={placeBet} style={{ width: '100%', padding: 18, borderRadius: 14, background: selectedSide ? 'rgba(255,255,255,0.1)' : 'rgba(255,255,255,0.03)', border: `2px solid ${selectedSide ? 'rgba(255,255,255,0.25)' : 'rgba(255,255,255,0.07)'}`, color: selectedSide ? '#fff' : '#333', fontFamily: 'var(--font-display)', fontSize: '0.9rem', fontWeight: 700, letterSpacing: '0.1em', cursor: selectedSide && !isLocked ? 'pointer' : 'not-allowed', transition: 'all 0.15s' }}>
-              {betting ? 'PLACING...' : 'CONFIRM BET'}
+
+            {/* ISLAND 6: Confirm */}
+            <button
+              className={`cfm-isl${selectedSide && !isLocked ? ' rdy' : ''}`}
+              disabled={!selectedSide || isLocked || betting}
+              onClick={placeBet}
+            >
+              {cfmText}
             </button>
           </>
-        )
-      ) : (
-        <div style={{ textAlign: 'center', padding: '32px 0' }}>
-          <div style={{ fontSize: '0.72rem', color: '#444', letterSpacing: '0.12em', marginBottom: 16 }}>CONNECT TO PLAY</div>
-          <button onClick={login} style={{ padding: '14px 40px', borderRadius: 12, background: 'linear-gradient(135deg, #1A1AFF, #7B2CFF)', border: 'none', color: '#fff', fontFamily: 'var(--font-display)', fontSize: '0.9rem', fontWeight: 700, letterSpacing: '0.08em', cursor: 'pointer' }}>
-            CONNECT WALLET
-          </button>
-        </div>
-      )}
+        )}
 
+      </div>
+
+      {/* Toast */}
       {toast && (
-        <div style={{ position: 'fixed', top: 20, left: '50%', transform: 'translateX(-50%)', background: 'rgba(8,8,8,0.97)', border: `1px solid ${toast.type === 'pos' ? '#4eff91' : toast.type === 'neg' ? '#ff4e6a' : '#333'}`, borderRadius: 10, padding: '10px 20px', zIndex: 100, color: toast.type === 'pos' ? '#4eff91' : toast.type === 'neg' ? '#ff4e6a' : '#fff', fontFamily: 'var(--font-display)', fontSize: '0.85rem', fontWeight: 600, whiteSpace: 'nowrap' }}>
+        <div className="hl-toast" style={{ color: toast.color, borderColor: toast.color + '44' }}>
           {toast.msg}
-        </div>
-      )}
-
-      {round && (
-        <div style={{ textAlign: 'center', marginTop: 16, opacity: 0.15, fontSize: '0.6rem', letterSpacing: '0.05em' }}>
-          seed: {round.round_seed.slice(0, 8)}
         </div>
       )}
     </div>
