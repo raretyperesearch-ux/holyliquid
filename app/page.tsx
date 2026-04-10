@@ -23,6 +23,7 @@ export default function HolyLiquid() {
   const [toast, setToast] = useState<{ msg: string; color: string } | null>(null)
   const [countdown, setCountdown] = useState({ lock: 0, close: 0 })
   const [waterPct, setWaterPct] = useState(36)
+  const [priceHistory, setPriceHistory] = useState<number[]>([])
   const toastTimer = useRef<NodeJS.Timeout | undefined>(undefined)
 
   useEffect(() => {
@@ -59,6 +60,15 @@ export default function HolyLiquid() {
     const id = setInterval(tick, 100)
     return () => clearInterval(id)
   }, [round?.id, round?.betting_closes_at, round?.closes_at])
+
+  // Track price history for chart
+  useEffect(() => {
+    if (!round?.current_price) return
+    setPriceHistory(prev => {
+      const next = [...prev, round.current_price]
+      return next.slice(-60)
+    })
+  }, [round?.current_price])
 
   function showToast(msg: string, color: string) {
     clearTimeout(toastTimer.current)
@@ -152,7 +162,7 @@ export default function HolyLiquid() {
     <div className="hl-root">
 
       {/* Three.js canvas */}
-      <GameCanvas waterLevel={waterLevel} onWaterPct={setWaterPct} />
+      <GameCanvas waterLevel={waterLevel} onWaterPct={setWaterPct} priceHistory={priceHistory} />
 
       {/* CSS Water */}
       <div className="hl-water" style={{ height: `${waterPct}%` }}>
