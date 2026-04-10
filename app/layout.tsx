@@ -1,6 +1,5 @@
 import type { Metadata } from 'next'
-import { PrivyProvider } from '@privy-io/react-auth'
-import { base } from 'viem/chains'
+import Providers from '@/components/Providers'
 import './globals.css'
 
 export const metadata: Metadata = {
@@ -20,25 +19,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         />
       </head>
       <body>
-        <PrivyProvider
-          appId={process.env.NEXT_PUBLIC_PRIVY_APP_ID!}
-          config={{
-            loginMethods: ['wallet', 'email'],
-            appearance: {
-              theme: 'dark',
-              accentColor: '#1A1AFF',
-            },
-            defaultChain: base,
-            supportedChains: [base],
-            embeddedWallets: {
-              ethereum: {
-                createOnLogin: 'users-without-wallets',
-              },
-            },
-          }}
-        >
-          {children}
-        </PrivyProvider>
+        <Providers>{children}</Providers>
       </body>
     </html>
   )
