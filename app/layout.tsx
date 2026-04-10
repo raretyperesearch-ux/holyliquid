@@ -26,7 +26,6 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
             appearance: {
               theme: 'dark',
               accentColor: '#1A1AFF',
-              logo: '',
             },
             defaultChain: {
               id: 8453,
@@ -36,9 +35,6 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
               rpcUrls: { default: { http: ['https://mainnet.base.org'] } },
               blockExplorers: { default: { name: 'Basescan', url: 'https://basescan.org' } },
             } as any,
-            embeddedWallets: {
-              createOnLogin: 'users-without-wallets',
-            },
           }}
         >
           {children}
