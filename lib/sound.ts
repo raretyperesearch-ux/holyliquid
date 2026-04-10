@@ -56,28 +56,41 @@ class SoundSystem {
     }
   }
 
-  /** Ensure an AudioContext exists and is running. Called lazily per play(). */
+  /**
+   * Ensure an AudioContext exists and is running. Called lazily per play().
+   *
+   * Note the local-variable dance: TypeScript's control-flow analysis
+   * doesn't narrow class fields (`this.ctx`) across statements or
+   * try/catch boundaries, so we build everything in locals, assign to
+   * `this` atomically, and re-read into a local at the end before the
+   * null check. Vercel's strict TS build fails otherwise.
+   */
   private ensureContext(): AudioContext | null {
     if (typeof window === 'undefined') return null
-    if (!this.ctx) {
+    if (!this.ctx || !this.master) {
       const AC =
         (window as any).AudioContext ||
         (window as any).webkitAudioContext
       if (!AC) return null
       try {
-        this.ctx = new AC()
-        this.master = this.ctx.createGain()
-        this.master.gain.value = MASTER_VOL
-        this.master.connect(this.ctx.destination)
+        const ctx: AudioContext = new AC()
+        const master = ctx.createGain()
+        master.gain.value = MASTER_VOL
+        master.connect(ctx.destination)
+        this.ctx = ctx
+        this.master = master
       } catch {
         return null
       }
     }
+    // Re-read into a local so TS can narrow the null check.
+    const ctx = this.ctx
+    if (!ctx) return null
     // Browsers suspend the context until a user gesture. Resume best-effort.
-    if (this.ctx.state === 'suspended') {
-      this.ctx.resume().catch(() => {})
+    if (ctx.state === 'suspended') {
+      ctx.resume().catch(() => {})
     }
-    return this.ctx
+    return ctx
   }
 
   play(name: SoundName): void {
