@@ -26,32 +26,54 @@ def get_oracle_status():
         "stale": stale,
     }
 
-def extract_price(raw) -> float:
-    """Safely extract a float price from whatever the SDK returns."""
+def extract_price(data) -> float:
+    """
+    Extract human-readable price from Pyth/Avantis callback data.
+    Pyth stores prices as: { price: str, conf: str, expo: int, publish_time: int }
+    Real price = float(price) * 10^expo  (expo is typically -8)
+    """
+    raw = data.price
+
+    # Case 1: dict with Pyth format { price, expo }
+    if isinstance(raw, dict):
+        if 'price' in raw and 'expo' in raw:
+            return float(raw['price']) * (10 ** int(raw['expo']))
+        # dict but different structure — try first numeric value
+        for v in raw.values():
+            try:
+                return float(v)
+            except (ValueError, TypeError):
+                continue
+
+    # Case 2: object with .price and .expo attributes (Pyth Price object)
+    if hasattr(raw, 'price') and hasattr(raw, 'expo'):
+        return float(raw.price) * (10 ** int(raw.expo))
+
+    # Case 3: already a plain number
     if isinstance(raw, (int, float)):
         return float(raw)
+
     if isinstance(raw, str):
         return float(raw)
-    if isinstance(raw, dict):
-        for key in ("price", "value", "current", "p"):
-            if key in raw:
-                return extract_price(raw[key])
-        for v in raw.values():
-            if isinstance(v, (int, float, str)):
-                try:
-                    return float(v)
-                except (ValueError, TypeError):
-                    continue
-    for attr in ("price", "value", "current"):
-        if hasattr(raw, attr):
-            return extract_price(getattr(raw, attr))
+
+    # Case 4: object with just .price attribute
+    if hasattr(raw, 'price'):
+        return extract_price_from_value(raw.price)
+
     raise ValueError(f"Cannot extract price from: {type(raw)} = {raw}")
+
+def extract_price_from_value(v) -> float:
+    if isinstance(v, (int, float)):
+        return float(v)
+    if isinstance(v, str):
+        return float(v)
+    raise ValueError(f"Cannot convert to float: {type(v)} = {v}")
 
 def make_handler(pair: str):
     def handler(data):
         global _last_update_ms, _connected
         try:
-            price = extract_price(data.price)
+            price = extract_price(data)
             now = datetime.now(timezone.utc)
             cache[pair] = {
                 "pair":      pair,
@@ -63,7 +85,12 @@ def make_handler(pair: str):
             _connected = True
             print(f"[Oracle] {pair}: ${price:.4f}")
         except Exception as e:
-            print(f"[Oracle] Handler error for {pair}: {e} | raw type: {type(data.price)} val: {data.price}")
+            # Log the raw structure so we can debug further if needed
+            print(f"[Oracle] Handler error for {pair}: {e}")
+            try:
+                print(f"[Oracle] data.price type={type(data.price)} val={data.price}")
+            except:
+                print(f"[Oracle] data type={type(data)}")
     return handler
 
 def ws_error_handler(e):
