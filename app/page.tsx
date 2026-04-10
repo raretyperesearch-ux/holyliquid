@@ -13,6 +13,8 @@ function fmt(n: number) {
   return n.toLocaleString('en-US', { maximumFractionDigits: 2 })
 }
 
+type ModalKind = null | 'deposit' | 'withdraw'
+
 export default function HolyLiquid() {
   const { ready, authenticated, login, getAccessToken, user } = usePrivy()
   const [accessToken, setAccessToken] = useState<string | null>(null)
@@ -24,6 +26,20 @@ export default function HolyLiquid() {
   const [priceHistory, setPriceHistory] = useState<number[]>([])
   const [countdown, setCountdown] = useState({ lock: 0, close: 0 })
   const toastTimer = useRef<NodeJS.Timeout | undefined>(undefined)
+
+  // Deposit / withdraw modal state
+  const [modal, setModal] = useState<ModalKind>(null)
+  const [treasuryWallet, setTreasuryWallet] = useState<string | null>(null)
+  const [treasuryLoaded, setTreasuryLoaded] = useState(false)
+  const [depositTxHash, setDepositTxHash] = useState('')
+  const [depositAmount, setDepositAmount] = useState('')
+  const [withdrawAmount, setWithdrawAmount] = useState('')
+  const [withdrawTo, setWithdrawTo] = useState('')
+  const [modalBusy, setModalBusy] = useState(false)
+
+  // Settle flash (shown briefly when a round result lands)
+  const [settleFlash, setSettleFlash] = useState<'win' | 'loss' | null>(null)
+  const lastSettledIdRef = useRef<string | null>(null)
 
   useEffect(() => {
     if (authenticated) {
@@ -46,18 +62,18 @@ export default function HolyLiquid() {
 
   useEffect(() => { if (accessToken) fetchBalance() }, [accessToken, fetchBalance])
 
-  // Track price history per pair — reset when asset changes so chart stays consistent
-  const lastPairRef = useRef<string | null>(null)
+  // Track price history per round — reset on round rollover and on asset swap.
+  // Keyed on round.id so same-pair rollovers also start fresh.
+  const lastRoundRef = useRef<string | null>(null)
   useEffect(() => {
-    if (!round?.current_price || !round?.pair) return
-    if (round.pair !== lastPairRef.current) {
-      // New pair — start fresh so ETH/SOL/BTC don't mix price scales
-      lastPairRef.current = round.pair
+    if (!round?.current_price || !round?.pair || !round?.id) return
+    if (round.id !== lastRoundRef.current) {
+      lastRoundRef.current = round.id
       setPriceHistory([round.current_price])
     } else {
-      setPriceHistory(prev => [...prev, round.current_price].slice(-60))
+      setPriceHistory(prev => [...prev, round.current_price].slice(-120))
     }
-  }, [round?.current_price, round?.pair])
+  }, [round?.current_price, round?.id, round?.pair])
 
   useEffect(() => {
     if (!round) return
@@ -106,6 +122,112 @@ export default function HolyLiquid() {
     finally { setBetting(false) }
   }
 
+  // Fetch treasury wallet once on first mount so the deposit modal has it ready
+  useEffect(() => {
+    let cancelled = false
+    fetch('/api/deposit')
+      .then(r => r.json())
+      .then(j => {
+        if (cancelled) return
+        setTreasuryWallet(j?.data?.treasury_wallet ?? null)
+        setTreasuryLoaded(true)
+      })
+      .catch(() => {
+        if (cancelled) return
+        setTreasuryLoaded(true)
+      })
+    return () => { cancelled = true }
+  }, [])
+
+  function openDeposit() {
+    setDepositTxHash('')
+    setDepositAmount('')
+    setModal('deposit')
+  }
+  function openWithdraw() {
+    setWithdrawAmount('')
+    // Prefill destination with the user's own wallet if available
+    const w = user?.wallet?.address
+    setWithdrawTo(w ?? '')
+    setModal('withdraw')
+  }
+  function closeModal() {
+    if (modalBusy) return
+    setModal(null)
+  }
+
+  async function submitDeposit() {
+    if (!accessToken) return
+    const amt = Number(depositAmount)
+    if (!depositTxHash || !depositTxHash.startsWith('0x')) {
+      return showToast('Enter a valid tx hash', '#ff7c98')
+    }
+    if (!Number.isFinite(amt) || amt <= 0) {
+      return showToast('Enter a valid amount', '#ff7c98')
+    }
+    setModalBusy(true)
+    try {
+      const res = await fetch('/api/deposit', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${accessToken}` },
+        body: JSON.stringify({ tx_hash: depositTxHash.trim(), amount: amt }),
+      })
+      const json = await res.json()
+      if (json.success) {
+        showToast(`Deposited $${fmt(json.data.amount_credited)}`, '#7df2a8')
+        // Refetch balance to get consistent available_usdc semantics
+        fetchBalance()
+        setModal(null)
+      } else {
+        showToast(json.error || 'Deposit failed', '#ff7c98')
+      }
+    } catch { showToast('Network error', '#ff7c98') }
+    finally { setModalBusy(false) }
+  }
+
+  async function submitWithdraw() {
+    if (!accessToken) return
+    const amt = Number(withdrawAmount)
+    if (!Number.isFinite(amt) || amt <= 0) {
+      return showToast('Enter a valid amount', '#ff7c98')
+    }
+    if (!withdrawTo || !withdrawTo.startsWith('0x')) {
+      return showToast('Enter a destination wallet', '#ff7c98')
+    }
+    if (balance !== null && amt > balance) {
+      return showToast('Insufficient balance', '#ff7c98')
+    }
+    setModalBusy(true)
+    try {
+      const res = await fetch('/api/withdraw', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${accessToken}` },
+        body: JSON.stringify({ amount: amt, to_wallet: withdrawTo.trim() }),
+      })
+      const json = await res.json()
+      if (json.success) {
+        showToast(`Withdrew $${fmt(json.data.amount)}`, '#7df2a8')
+        // Refetch balance to get consistent available_usdc semantics
+        fetchBalance()
+        setModal(null)
+      } else {
+        showToast(json.error || 'Withdraw failed', '#ff7c98')
+      }
+    } catch { showToast('Network error', '#ff7c98') }
+    finally { setModalBusy(false) }
+  }
+
+  // When a round settles and the user had a bet, flash the scene green/red
+  useEffect(() => {
+    if (!round || round.status !== 'settled') return
+    if (lastSettledIdRef.current === round.id) return
+    lastSettledIdRef.current = round.id
+    let t: ReturnType<typeof setTimeout> | undefined
+    if (myBet?.won === true)  { setSettleFlash('win');  t = setTimeout(() => setSettleFlash(null), 1300) }
+    if (myBet?.won === false) { setSettleFlash('loss'); t = setTimeout(() => setSettleFlash(null), 1300) }
+    return () => { if (t) clearTimeout(t) }
+  }, [round?.id, round?.status, myBet?.won])
+
   const isLocked = !round || round.status !== 'open' || countdown.lock <= 0
   const pnlPos   = (round?.pnl_usd ?? 0) >= 0
 
@@ -116,30 +238,58 @@ export default function HolyLiquid() {
     : round.status === 'void' ? 'void'
     : 'loading'
 
+  // Real round duration derived from backend timestamps — no more hardcoded
+  // 10000/20000 magic numbers. open_price_ts is when the round opened.
+  // Defensive: if any timestamp is missing/invalid, fall back to 1 so the
+  // progress ratio stays finite (width: 0%) instead of NaN.
+  const totalBettingMs = (() => {
+    if (!round) return 1
+    const closes = new Date(round.betting_closes_at).getTime()
+    const opens  = new Date(round.open_price_ts).getTime()
+    if (!Number.isFinite(closes) || !Number.isFinite(opens) || closes <= opens) return 1
+    return closes - opens
+  })()
+  const totalWatchingMs = (() => {
+    if (!round) return 1
+    const closes = new Date(round.closes_at).getTime()
+    const lock   = new Date(round.betting_closes_at).getTime()
+    if (!Number.isFinite(closes) || !Number.isFinite(lock) || closes <= lock) return 1
+    return closes - lock
+  })()
+
   const timerSec = phase === 'betting'
     ? Math.ceil(countdown.lock / 1000)
     : Math.ceil(countdown.close / 1000)
+
+  // Final 10 seconds of betting → pulse + "LOCKING SOON"
+  const isFinalCountdown = phase === 'betting' && countdown.lock > 0 && countdown.lock <= 10_000
 
   const timerDisplay = phase === 'settled' ? (round?.result ?? '--')
     : phase === 'void' ? 'VOID'
     : `0:${String(Math.max(0, timerSec)).padStart(2, '0')}`
 
   const progressPct = phase === 'betting'
-    ? (countdown.lock / 10000) * 100
-    : (countdown.close / 20000) * 100
+    ? (countdown.lock / totalBettingMs) * 100
+    : phase === 'watching'
+    ? (countdown.close / totalWatchingMs) * 100
+    : 0
 
-  const phaseLabel = phase === 'betting' ? '● BETTING OPEN'
-    : phase === 'watching' ? '● BETS LOCKED'
+  const phaseLabel = phase === 'betting'
+    ? (isFinalCountdown ? '● LOCKING SOON' : '● BETTING OPEN')
+    : phase === 'watching' ? '● WAIT FOR NEXT ROUND'
     : phase === 'settled' ? `● ${round?.result ?? 'SETTLED'}`
     : phase === 'void' ? '● VOID'
     : '● LOADING'
 
-  const phaseColor = phase === 'betting' ? '#7df2a8'
+  const phaseColor = phase === 'betting'
+    ? (isFinalCountdown ? '#FFB84D' : '#7df2a8')
     : phase === 'watching' ? '#FFB300'
     : '#ff7c98'
 
   const progColor = phase === 'betting'
-    ? 'linear-gradient(90deg,#1A1AFF,#7B2CFF,#9A7BFF)'
+    ? (isFinalCountdown
+        ? 'linear-gradient(90deg,#FF6A00,#FFB84D,#FFD07A)'
+        : 'linear-gradient(90deg,#1A1AFF,#7B2CFF,#9A7BFF)')
     : '#FFB300'
 
   const posLabel = round
@@ -147,8 +297,12 @@ export default function HolyLiquid() {
     : 'Loading...'
 
   const cfmText = betting ? 'Placing...'
-    : !selectedSide ? 'Confirm Bet'
-    : `${selectedSide === 'pos' ? '+PNL' : '−PNL'} · $${selectedChip} · Confirm`
+    : phase === 'watching' ? 'Waiting For Next Round'
+    : phase === 'settled' ? 'Waiting For Next Round'
+    : phase === 'void' ? 'Round Voided'
+    : isLocked ? 'Betting Closed'
+    : !selectedSide ? 'Select Side'
+    : `${selectedSide === 'pos' ? '+PNL' : '−PNL'} · $${selectedChip} · Place Bet`
 
   return (
     <div className="hl-root">
@@ -177,8 +331,14 @@ export default function HolyLiquid() {
           <PriceWaterChart priceHistory={priceHistory} pnlPos={pnlPos} />
         </div>
 
+        {/* ── SETTLE FLASH — brief color wash over the scene on round result ── */}
+        {settleFlash && <div className={`settle-flash ${settleFlash}`} />}
+
         {/* ── UI ISLANDS — sit on top of chart ── */}
-        <div className="hl-ui" style={{ position: 'relative', zIndex: 1 }}>
+        <div
+          className={`hl-ui${phase === 'watching' ? ' is-locked' : ''}`}
+          style={{ position: 'relative', zIndex: 1 }}
+        >
 
         {/* HEADER */}
         <div className="hl-hdr">
@@ -189,9 +349,13 @@ export default function HolyLiquid() {
           {!ready ? null : !authenticated ? (
             <button className="isl connect-pill" onClick={login}>Connect</button>
           ) : (
-            <div className="isl bal-isl">
-              <div className="bl">Balance</div>
-              <div className="bv">{balance !== null ? `$${fmt(balance)}` : '---'}</div>
+            <div className="isl account-isl">
+              <button className="acct-btn deposit" onClick={openDeposit}>Deposit</button>
+              <div className="acct-bal">
+                <div className="bl">Balance</div>
+                <div className="bv">{balance !== null ? `$${fmt(balance)}` : '---'}</div>
+              </div>
+              <button className="acct-btn withdraw" onClick={openWithdraw}>Withdraw</button>
             </div>
           )}
         </div>
@@ -220,8 +384,15 @@ export default function HolyLiquid() {
         {/* ISLAND 3: Timer */}
         <div className="isl timer-isl">
           <div className="ti-row">
-            <span className="phase-lbl" style={{ color: phaseColor }}>{phaseLabel}</span>
-            <span className="timer-num">{timerDisplay}</span>
+            <span
+              className={`phase-lbl${isFinalCountdown ? ' locking-soon' : ''}`}
+              style={{ color: phaseColor }}
+            >
+              {phaseLabel}
+            </span>
+            <span className={`timer-num${isFinalCountdown ? ' locking-soon' : ''}`}>
+              {timerDisplay}
+            </span>
           </div>
           <div className="prog-tr">
             <div className="prog-f" style={{ width: `${Math.max(0, Math.min(100, progressPct))}%`, background: progColor }} />
@@ -263,12 +434,12 @@ export default function HolyLiquid() {
             {/* ISLANDS 5a & 5b */}
             <div className="btns-row">
               <button
-                className={`sb sb-pos${selectedSide === 'pos' ? ' on' : ''}`}
+                className={`sb sb-pos${selectedSide === 'pos' ? ' on' : ''}${isLocked ? ' sb-locked' : ''}`}
                 disabled={isLocked}
                 onClick={() => setSelectedSide(prev => prev === 'pos' ? null : 'pos')}
               >+PNL</button>
               <button
-                className={`sb sb-neg${selectedSide === 'neg' ? ' on' : ''}`}
+                className={`sb sb-neg${selectedSide === 'neg' ? ' on' : ''}${isLocked ? ' sb-locked' : ''}`}
                 disabled={isLocked}
                 onClick={() => setSelectedSide(prev => prev === 'neg' ? null : 'neg')}
               >−PNL</button>
@@ -286,6 +457,100 @@ export default function HolyLiquid() {
         )}
         </div>
       </div>
+
+      {/* ── DEPOSIT / WITHDRAW MODAL ── */}
+      {modal && (
+        <div className="modal-backdrop" onClick={closeModal}>
+          <div className="modal-card" onClick={(e) => e.stopPropagation()}>
+            {modal === 'deposit' && (
+              <>
+                <div className="modal-title">Deposit USDC</div>
+                <div className="modal-sub">
+                  Send USDC on <strong>Base</strong> to the treasury wallet below, then paste the transaction hash here to credit your balance.
+                </div>
+                <div className="modal-field">
+                  <label>Treasury Wallet</label>
+                  <div className="modal-addr" title="Click to select">
+                    {treasuryWallet
+                      ? treasuryWallet
+                      : treasuryLoaded
+                        ? 'Deposit address unavailable — contact support'
+                        : 'Loading...'}
+                  </div>
+                </div>
+                <div className="modal-field">
+                  <label>Amount (USDC)</label>
+                  <input
+                    className="modal-input"
+                    type="number"
+                    inputMode="decimal"
+                    placeholder="10.00"
+                    value={depositAmount}
+                    onChange={(e) => setDepositAmount(e.target.value)}
+                  />
+                </div>
+                <div className="modal-field">
+                  <label>Transaction Hash</label>
+                  <input
+                    className="modal-input mono"
+                    type="text"
+                    placeholder="0x..."
+                    value={depositTxHash}
+                    onChange={(e) => setDepositTxHash(e.target.value)}
+                  />
+                </div>
+                <div className="modal-btns">
+                  <button className="mb cancel" disabled={modalBusy} onClick={closeModal}>Cancel</button>
+                  <button className="mb submit" disabled={modalBusy || !treasuryWallet} onClick={submitDeposit}>
+                    {modalBusy ? 'Verifying...' : 'Credit Deposit'}
+                  </button>
+                </div>
+              </>
+            )}
+
+            {modal === 'withdraw' && (
+              <>
+                <div className="modal-title">Withdraw USDC</div>
+                <div className="modal-sub">
+                  Withdraw USDC on <strong>Base</strong> to any wallet. Minimum $1, maximum $10,000 per withdrawal.
+                </div>
+                <div className="modal-field">
+                  <label>Amount (USDC)</label>
+                  <input
+                    className="modal-input"
+                    type="number"
+                    inputMode="decimal"
+                    placeholder="10.00"
+                    value={withdrawAmount}
+                    onChange={(e) => setWithdrawAmount(e.target.value)}
+                  />
+                </div>
+                <div className="modal-field">
+                  <label>Destination Wallet</label>
+                  <input
+                    className="modal-input mono"
+                    type="text"
+                    placeholder="0x..."
+                    value={withdrawTo}
+                    onChange={(e) => setWithdrawTo(e.target.value)}
+                  />
+                </div>
+                {balance !== null && (
+                  <div className="modal-sub" style={{ textAlign: 'right' }}>
+                    Available: <strong style={{ color: '#7df2a8' }}>${fmt(balance)}</strong>
+                  </div>
+                )}
+                <div className="modal-btns">
+                  <button className="mb cancel" disabled={modalBusy} onClick={closeModal}>Cancel</button>
+                  <button className="mb submit" disabled={modalBusy} onClick={submitWithdraw}>
+                    {modalBusy ? 'Sending...' : 'Withdraw'}
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* TOAST */}
       {toast && (

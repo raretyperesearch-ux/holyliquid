@@ -87,30 +87,78 @@ export default function PriceWaterChart({ priceHistory, pnlPos }: Props) {
     const lerp = (a: number, b: number, n: number) => a + (b - a) * n
     const SK = 0.045, SD = 0.72
 
-    function getBaseY(x: number, W: number, H: number, prices: number[]): number {
-      const ratio = x / (W - 1)
-      const idx = ratio * (prices.length - 1)
-      // Smooth with 5-point weighted average to remove jaggedness
-      let v = 0, wt = 0
-      for (let d = -2; d <= 2; d++) {
-        const i = Math.max(0, Math.min(prices.length - 1, Math.round(idx + d)))
-        const w = 1 / (Math.abs(d) + 1)
-        v += prices[i] * w; wt += w
+    // EMA-smooth a price series. alpha controls responsiveness: lower = calmer.
+    function emaSmooth(prices: number[], alpha = 0.18): number[] {
+      if (prices.length === 0) return prices
+      const out = new Array<number>(prices.length)
+      out[0] = prices[0]
+      for (let i = 1; i < prices.length; i++) {
+        out[i] = out[i - 1] + alpha * (prices[i] - out[i - 1])
       }
-      v /= wt
-      const mn = Math.min(...prices), mx = Math.max(...prices), range = (mx - mn) || 1
-      return H * 0.08 + (H * 0.66) - ((v - mn) / range) * (H * 0.66)
+      return out
     }
 
-    function getY(x: number, chop: number, t: number, W: number, H: number, prices: number[]): number {
-      const b = getBaseY(x, W, H, prices)
+    // Re-derived on each frame from the latest prices. Keeps a stable reference
+    // so getBaseY doesn't need to rebuild its min/mid math on every x sample.
+    let smoothedPrices: number[] = []
+    let smoothedMin = 0
+    let smoothedMax = 0
+    let smoothedMid = 0
+    let smoothedPaddedRange = 1
+
+    function refreshSmoothedPrices(prices: number[]) {
+      smoothedPrices = emaSmooth(prices, 0.18)
+      if (smoothedPrices.length === 0) {
+        smoothedMin = 0; smoothedMax = 0; smoothedMid = 0; smoothedPaddedRange = 1
+        return
+      }
+      let mn = smoothedPrices[0], mx = smoothedPrices[0]
+      for (let i = 1; i < smoothedPrices.length; i++) {
+        const p = smoothedPrices[i]
+        if (p < mn) mn = p
+        if (p > mx) mx = p
+      }
+      // Pad the range so tiny price movements don't look like tsunamis.
+      // Use max of: 1.8x raw, 0.2% of price level, and an absolute floor.
+      const rawRange = mx - mn
+      const padded = Math.max(rawRange * 1.8, Math.abs(mx) * 0.002, 1e-9)
+      smoothedMin = mn
+      smoothedMax = mx
+      smoothedMid = (mx + mn) / 2
+      smoothedPaddedRange = padded
+    }
+
+    function getBaseY(x: number, W: number, H: number): number {
+      if (smoothedPrices.length === 0) return H * 0.5
+      const ratio = x / Math.max(1, W - 1)
+      const idx = ratio * (smoothedPrices.length - 1)
+      // 5-point weighted average across the spatial axis for extra smoothness
+      // on top of the temporal EMA. Catches inter-sample aliasing.
+      let v = 0, wt = 0
+      for (let d = -2; d <= 2; d++) {
+        const i = Math.max(0, Math.min(smoothedPrices.length - 1, Math.round(idx + d)))
+        const w = 1 / (Math.abs(d) + 1)
+        v += smoothedPrices[i] * w; wt += w
+      }
+      v /= wt
+      // Normalize against the padded range centered on mid — calmer, premium feel.
+      const normalized = (v - (smoothedMid - smoothedPaddedRange / 2)) / smoothedPaddedRange
+      // Clamp defensively so a noisy single sample can't shoot off-screen.
+      const clamped = Math.max(0, Math.min(1, normalized))
+      return H * 0.08 + (H * 0.66) - clamped * (H * 0.66)
+    }
+
+    function getY(x: number, chop: number, t: number, W: number, H: number): number {
+      const b = getBaseY(x, W, H)
+      // Procedural chop dialed back ~45% vs the original. The water should
+      // whisper on top of the real price curve, not karate-kick over it.
       return b
-        + Math.sin(x * .016 + t * 1.9) * 3 * chop
-        + Math.sin(x * .028 - t * 1.4) * 1.8 * chop
-        + Math.sin(x * .055 + t * 2.8) * 0.9
-        + Math.sin(x * .09  - t * 3.5) * .5 * chop
-        + Math.sin(x * .15  + t * 5)   * .25
-        + Math.sin(x * .24  - t * 6.5) * .15 * chop
+        + Math.sin(x * .016 + t * 1.9) * 1.6 * chop
+        + Math.sin(x * .028 - t * 1.4) * 0.95 * chop
+        + Math.sin(x * .055 + t * 2.8) * 0.5
+        + Math.sin(x * .09  - t * 3.5) * 0.28 * chop
+        + Math.sin(x * .15  + t * 5)   * 0.14
+        + Math.sin(x * .24  - t * 6.5) * 0.08 * chop
     }
 
     function drawCloud(ctx: CanvasRenderingContext2D, cx: number, cy: number, cw: number, ch: number, alpha: number, blend: number) {
@@ -170,8 +218,11 @@ export default function PriceWaterChart({ priceHistory, pnlPos }: Props) {
         lastSceneHeight = H
       }
 
+      // Rebuild the smoothed price series once per frame (not per x).
+      refreshSmoothedPrices(prices)
+
       const s: number[] = []
-      for (let x = 0; x < W; x++) s.push(getY(x, chop, t, W, H, prices))
+      for (let x = 0; x < W; x++) s.push(getY(x, chop, t, W, H))
       const skyH = s[0] + 8
       const rn = (n: number) => Math.round(n)
 
@@ -277,9 +328,9 @@ export default function PriceWaterChart({ priceHistory, pnlPos }: Props) {
         }
       }
 
-      // Second wave layer
+      // Second wave layer — amplitudes dialed back to match getY calming
       ctx2.beginPath(); ctx2.moveTo(0,H); ctx2.lineTo(0,s[0]+5)
-      for(let x=1;x<W;x++) ctx2.lineTo(x,s[x]+5+Math.sin(x*.018-t*1.5)*3.5+Math.sin(x*.032+t*1.1)*2)
+      for(let x=1;x<W;x++) ctx2.lineTo(x,s[x]+5+Math.sin(x*.018-t*1.5)*1.9+Math.sin(x*.032+t*1.1)*1.1)
       ctx2.lineTo(W,H); ctx2.closePath()
       const l2G=ctx2.createLinearGradient(0,0,0,H*.28)
       l2G.addColorStop(0,B>.5?'rgba(60,150,200,.07)':'rgba(60,70,140,.06)'); l2G.addColorStop(1,'rgba(0,0,0,0)')

@@ -12,6 +12,7 @@ export interface RoundData {
   leverage: number
   liq_price: number
   open_price: number
+  open_price_ts: string
   current_price: number
   current_value: number
   pnl_usd: number
