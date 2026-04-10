@@ -1,5 +1,6 @@
 import type { Metadata } from 'next'
 import { PrivyProvider } from '@privy-io/react-auth'
+import { base } from 'viem/chains'
 import './globals.css'
 
 export const metadata: Metadata = {
@@ -27,14 +28,11 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
               theme: 'dark',
               accentColor: '#1A1AFF',
             },
-            defaultChain: {
-              id: 8453,
-              name: 'Base',
-              network: 'base',
-              nativeCurrency: { name: 'Ether', symbol: 'ETH', decimals: 18 },
-              rpcUrls: { default: { http: ['https://mainnet.base.org'] } },
-              blockExplorers: { default: { name: 'Basescan', url: 'https://basescan.org' } },
-            } as any,
+            defaultChain: base,
+            supportedChains: [base],
+            embeddedWallets: {
+              createOnLogin: 'users-without-wallets',
+            },
           }}
         >
           {children}
