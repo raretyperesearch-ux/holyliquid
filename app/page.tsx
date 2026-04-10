@@ -36,6 +36,7 @@ export default function HolyLiquid() {
   const [withdrawAmount, setWithdrawAmount] = useState('')
   const [withdrawTo, setWithdrawTo] = useState('')
   const [modalBusy, setModalBusy] = useState(false)
+  const [soundOn, setSoundOn] = useState(true)
 
   // Settle flash (shown briefly when a round result lands)
   const [settleFlash, setSettleFlash] = useState<'win' | 'loss' | null>(null)
@@ -308,16 +309,6 @@ export default function HolyLiquid() {
     })
   }
 
-  const ctxCountdownLabel = phase === 'betting' ? 'LOCK IN'
-    : phase === 'watching' ? 'CLOSES'
-    : phase === 'settled' ? 'RESULT'
-    : phase === 'void' ? 'VOID'
-    : 'LOADING'
-  const ctxCountdownValue = phase === 'settled' ? (round?.result ?? '--')
-    : phase === 'void' ? '—'
-    : phase === 'loading' ? '--'
-    : timerDisplay
-
   // Profit/loss amount on a settled bet
   const settleWon = myBet?.won === true
   const settleProfit = myBet
@@ -333,6 +324,20 @@ export default function HolyLiquid() {
     : isLocked ? 'Betting Closed'
     : !selectedSide ? 'Select Side'
     : `${selectedSide === 'pos' ? '+PNL' : '−PNL'} · $${selectedChip} · Place Bet`
+
+  const estimatedPayout = (() => {
+    if (!round || !selectedSide) return null
+    const winPool = selectedSide === 'pos' ? Number(round.pos_pool) : Number(round.neg_pool)
+    const losePool = selectedSide === 'pos' ? Number(round.neg_pool) : Number(round.pos_pool)
+    if (!Number.isFinite(winPool) || !Number.isFinite(losePool)) return null
+    if (winPool <= 0) return selectedChip
+    return selectedChip + (selectedChip / winPool) * (losePool * 0.95)
+  })()
+  const ctaSubtext = !selectedSide
+    ? 'Choose +PNL or −PNL to preview payout'
+    : estimatedPayout === null
+      ? 'Live payout unavailable'
+      : `Est. payout $${fmt(estimatedPayout)}`
 
   return (
     <div className="hl-root">
@@ -376,13 +381,22 @@ export default function HolyLiquid() {
             <div className="lsub">Base Prediction</div>
             <div className="ltxt">HOLYLIQUID</div>
           </div>
+          <div className="isl marquee-pill">LIVE LIQUID ROUND · BASE</div>
+          <button
+            className={`isl sound-pill${soundOn ? ' on' : ''}`}
+            type="button"
+            onClick={() => setSoundOn((v) => !v)}
+            aria-label={soundOn ? 'Mute sound effects' : 'Enable sound effects'}
+          >
+            {soundOn ? 'Sound On' : 'Muted'}
+          </button>
           {!ready ? null : !authenticated ? (
             <button className="isl connect-pill" onClick={login}>Connect</button>
           ) : (
             <div className="isl account-isl">
               <button className="acct-btn deposit" onClick={openDeposit}>Deposit</button>
               <div className="acct-bal">
-                <div className="bl">Balance</div>
+                <div className="bl">Available</div>
                 <div className="bv">{balance !== null ? `$${fmt(balance)}` : '---'}</div>
               </div>
               <button className="acct-btn withdraw" onClick={openWithdraw}>Withdraw</button>
@@ -390,28 +404,47 @@ export default function HolyLiquid() {
           )}
         </div>
 
-        {/* ISLAND 1: Position Value */}
-        <div className="isl val-isl">
-          <div className="vi-lbl">{posLabel}</div>
-          <div className={`big-val ${pnlPos ? 'pos' : 'neg'}`}>
-            ${round ? Math.round(round.current_value).toLocaleString() : '---'}
+        <div className="stats-row">
+          {/* ISLAND 1: Position Value */}
+          <div className="isl val-isl">
+            <div className="vi-lbl">{posLabel}</div>
+            <div className={`big-val ${pnlPos ? 'pos' : 'neg'}`}>
+              ${round ? Math.round(round.current_value).toLocaleString() : '---'}
+            </div>
+          </div>
+
+          {/* ISLAND 2: PnL */}
+          <div className="isl pnl-isl">
+            <span className="pnl-mini">PnL</span>
+            <span className="pnl-chg" style={{ color: pnlPos ? '#7df2a8' : '#ff7c98' }}>
+              {pnlPos ? '+' : ''}${Math.abs(round?.pnl_usd ?? 0).toFixed(2)}
+            </span>
+            <span className="pnl-pct">
+              {pnlPos ? '+' : ''}{(round?.pnl_pct ?? 0).toFixed(2)}%
+            </span>
+            <span className="pnl-round">Round #{round?.round_number ?? '---'}</span>
+          </div>
+
+          {/* ISLAND 3: Timer */}
+          <div className="isl timer-isl">
+            <div className="ti-row">
+              <span
+                className={`phase-lbl${isFinalCountdown ? ' locking-soon' : ''}`}
+                style={{ color: phaseColor }}
+              >
+                {phaseLabel}
+              </span>
+              <span className={`timer-num${isFinalCountdown ? ' locking-soon' : ''}`}>
+                {timerDisplay}
+              </span>
+            </div>
+            <div className="prog-tr">
+              <div className="prog-f" style={{ width: `${Math.max(0, Math.min(100, progressPct))}%`, background: progColor }} />
+            </div>
           </div>
         </div>
 
-        {/* ISLAND 2: PnL */}
-        <div className="isl pnl-isl">
-          <span className="pnl-chg" style={{ color: pnlPos ? '#7df2a8' : '#ff7c98' }}>
-            {pnlPos ? '+' : ''}${Math.abs(round?.pnl_usd ?? 0).toFixed(2)}
-          </span>
-          <div className="pnl-div" />
-          <span className="pnl-pct">
-            {pnlPos ? '+' : ''}{(round?.pnl_pct ?? 0).toFixed(2)}%
-          </span>
-          <div className="pnl-div" />
-          <span className="pnl-round">Round #{round?.round_number ?? '---'}</span>
-        </div>
-
-        {/* CONTEXT STRIP: Entry / Now / Lock-in */}
+        {/* CONTEXT STRIP: Entry / Now / Players Live */}
         <div className="isl ctx-isl">
           <div className="ctx-col">
             <div className="ctx-lbl">Entry</div>
@@ -426,28 +459,10 @@ export default function HolyLiquid() {
           </div>
           <div className="ctx-div" />
           <div className="ctx-col">
-            <div className="ctx-lbl">{ctxCountdownLabel}</div>
+            <div className="ctx-lbl">Players Live</div>
             <div className={`ctx-val${isFinalCountdown ? ' locking-soon' : ''}`}>
-              {ctxCountdownValue}
+              {round ? Math.round((Number(round.pos_pool) + Number(round.neg_pool)) / 12) : '--'}
             </div>
-          </div>
-        </div>
-
-        {/* ISLAND 3: Timer */}
-        <div className="isl timer-isl">
-          <div className="ti-row">
-            <span
-              className={`phase-lbl${isFinalCountdown ? ' locking-soon' : ''}`}
-              style={{ color: phaseColor }}
-            >
-              {phaseLabel}
-            </span>
-            <span className={`timer-num${isFinalCountdown ? ' locking-soon' : ''}`}>
-              {timerDisplay}
-            </span>
-          </div>
-          <div className="prog-tr">
-            <div className="prog-f" style={{ width: `${Math.max(0, Math.min(100, progressPct))}%`, background: progColor }} />
           </div>
         </div>
 
@@ -485,7 +500,7 @@ export default function HolyLiquid() {
           <>
             {/* ISLAND 4: Chips */}
             <div className="isl chips-isl">
-              <div className="ci-lbl">Bet Amount</div>
+              <div className="ci-lbl">1 · Select Amount</div>
               <div className="chips-row">
                 {CHIPS.map(c => (
                   <div key={c} className={`chip${selectedChip === c ? ' sel' : ''}`} onClick={() => setSelectedChip(c)}>
@@ -518,7 +533,8 @@ export default function HolyLiquid() {
               disabled={!selectedSide || isLocked || betting}
               onClick={placeBet}
             >
-              {cfmText}
+              <span className="cfm-main">{cfmText}</span>
+              <span className="cfm-sub">{ctaSubtext}</span>
             </button>
           </>
         )}
