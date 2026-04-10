@@ -65,8 +65,14 @@ export default function PriceWaterChart({ priceHistory, pnlPos }: Props) {
     function getBaseY(x: number, W: number, H: number, prices: number[]): number {
       const ratio = x / (W - 1)
       const idx = ratio * (prices.length - 1)
-      const lo = Math.floor(idx), hi = Math.min(lo + 1, prices.length - 1)
-      const v = prices[lo] + (prices[hi] - prices[lo]) * (idx - lo)
+      // Smooth with 5-point weighted average to remove jaggedness
+      let v = 0, wt = 0
+      for (let d = -2; d <= 2; d++) {
+        const i = Math.max(0, Math.min(prices.length - 1, Math.round(idx + d)))
+        const w = 1 / (Math.abs(d) + 1)
+        v += prices[i] * w; wt += w
+      }
+      v /= wt
       const mn = Math.min(...prices), mx = Math.max(...prices), range = (mx - mn) || 1
       return H * 0.08 + (H * 0.66) - ((v - mn) / range) * (H * 0.66)
     }
@@ -74,12 +80,12 @@ export default function PriceWaterChart({ priceHistory, pnlPos }: Props) {
     function getY(x: number, chop: number, t: number, W: number, H: number, prices: number[]): number {
       const b = getBaseY(x, W, H, prices)
       return b
-        + Math.sin(x * .016 + t * 1.9) * 5 * chop
-        + Math.sin(x * .028 - t * 1.4) * 3 * chop
-        + Math.sin(x * .055 + t * 2.8) * 1.5
-        + Math.sin(x * .09  - t * 3.5) * .8 * chop
-        + Math.sin(x * .15  + t * 5)   * .4
-        + Math.sin(x * .24  - t * 6.5) * .25 * chop
+        + Math.sin(x * .016 + t * 1.9) * 3 * chop
+        + Math.sin(x * .028 - t * 1.4) * 1.8 * chop
+        + Math.sin(x * .055 + t * 2.8) * 0.9
+        + Math.sin(x * .09  - t * 3.5) * .5 * chop
+        + Math.sin(x * .15  + t * 5)   * .25
+        + Math.sin(x * .24  - t * 6.5) * .15 * chop
     }
 
     function drawCloud(ctx: CanvasRenderingContext2D, cx: number, cy: number, cw: number, ch: number, alpha: number, blend: number) {
