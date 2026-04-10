@@ -33,15 +33,23 @@ export default function PriceWaterChart({ priceHistory, pnlPos }: Props) {
     if (!cv) return
     const parent = cv.parentElement!
 
-    const resize = () => {
-      cv.width  = parent.clientWidth  * devicePixelRatio
-      cv.height = parent.clientHeight * devicePixelRatio
-      cv.style.width  = parent.clientWidth  + 'px'
-      cv.style.height = parent.clientHeight + 'px'
-      stateRef.current.boatX = parent.clientWidth * 0.62
+    const applySize = () => {
+      // Walk up to find hl-root for reliable width
+      const root = cv.closest('.hl-root') as HTMLElement || parent
+      const W = root.clientWidth || window.innerWidth
+      const H = parent.clientHeight || 180
+      cv.width  = W * devicePixelRatio
+      cv.height = H * devicePixelRatio
+      cv.style.width  = W + 'px'
+      cv.style.height = H + 'px'
+      stateRef.current.boatX = W * 0.62
     }
+    // Defer so layout has settled
+    const resize = () => requestAnimationFrame(applySize)
     resize()
     window.addEventListener('resize', resize)
+    const ro = new ResizeObserver(resize)
+    ro.observe(parent)
 
     const CLOUDS = [
       {x:0,    y:18, w:90,  h:22, spd:.12, alpha:.55},
@@ -399,6 +407,7 @@ export default function PriceWaterChart({ priceHistory, pnlPos }: Props) {
     return () => {
       cancelAnimationFrame(animRef.current)
       window.removeEventListener('resize', resize)
+      ro.disconnect()
     }
   }, [])
 
