@@ -27,7 +27,7 @@ export default function GamePage() {
   const [toast, setToast] = useState<{ msg: string; type: 'pos' | 'neg' | 'info' } | null>(null)
   const [priceHistory, setPriceHistory] = useState<number[]>([])
   const [countdown, setCountdown] = useState({ lock: 0, close: 0 })
-  const toastTimer = useRef<NodeJS.Timeout>()
+  const toastTimer = useRef<NodeJS.Timeout | undefined>(undefined)
 
   // Get access token when authenticated
   useEffect(() => {
