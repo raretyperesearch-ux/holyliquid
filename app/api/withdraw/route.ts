@@ -32,13 +32,28 @@ export async function POST(req: NextRequest) {
       return badRequest(`Insufficient available balance. Available: $${available.toFixed(2)}`)
     }
 
-    // Deduct balance before sending (prevents double-spend)
+    // ⚠️ AUDIT BEFORE PRODUCTION ⚠️
+    // The block below has two semantic issues worth a second pair of eyes
+    // before real-money traffic:
+    //
+    // 1. The `hl_decrease_locked(p_amount: 0)` call is a no-op placeholder
+    //    that ignores its own `deductError`. It reads like something that
+    //    was supposed to clear a lock but currently doesn't.
+    //
+    // 2. The balance update uses a non-atomic read-then-write pattern
+    //    (`bal.balance_usdc - amount`) which isn't concurrency-safe under
+    //    parallel withdraws. The `.gte('balance_usdc', amount)` guard
+    //    prevents negative balances but can still race with other mutators.
+    //    Prefer an atomic decrement RPC similar to `hl_credit_deposit`.
+    //
+    // Leaving intact so behavior doesn't change silently — flag for review.
     const { error: deductError } = await sb.rpc('hl_decrease_locked', {
       p_wallet: wallet,
-      p_amount: 0, // no locked amount to decrease
+      p_amount: 0, // no locked amount to decrease — placeholder, see note above
     })
+    void deductError // intentionally swallowed; see audit note above
 
-    // Direct balance deduction
+    // Direct balance deduction (see audit note re: atomicity)
     const { error: updateError } = await sb
       .from('hl_balances')
       .update({

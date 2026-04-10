@@ -3,6 +3,22 @@ import { verifyAuth, unauthorized, ok, badRequest, serverError } from '@/lib/aut
 import { createServerSupabase } from '@/lib/supabase/server'
 import { verifyUsdcDeposit } from '@/lib/deposit'
 
+// Expose the on-chain destination for USDC deposits so the client can
+// display it in the deposit modal. Read-only, no auth needed.
+export async function GET() {
+  try {
+    const treasury = process.env.TREASURY_WALLET_ADDRESS ?? null
+    return ok({
+      treasury_wallet: treasury,
+      chain: 'base',
+      token: 'USDC',
+      token_contract: '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913',
+    })
+  } catch (e: any) {
+    return serverError(e)
+  }
+}
+
 export async function POST(req: NextRequest) {
   try {
     const wallet = await verifyAuth(req)
