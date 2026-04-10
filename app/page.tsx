@@ -146,12 +146,7 @@ export default function HolyLiquid() {
   return (
     <div className="hl-root">
 
-      {/* ── BOAT ZONE — 2D canvas water chart ── */}
-      <div style={{ position: 'absolute', inset: 0, zIndex: 0 }}>
-        <PriceWaterChart priceHistory={priceHistory} pnlPos={pnlPos} />
-      </div>
-
-      {/* ── UI ISLANDS ── */}
+      {/* ── UI ISLANDS ── */
       <div className="hl-ui">
 
         {/* HEADER */}
@@ -203,7 +198,9 @@ export default function HolyLiquid() {
         </div>
 
         {/* BOAT ZONE — chart lives here */}
-        <div className="boat-zone" />
+        <div className="boat-zone" style={{ minHeight: 160 }}>
+          <PriceWaterChart priceHistory={priceHistory} pnlPos={pnlPos} />
+        </div>
 
         {/* BET PANEL */}
         {!authenticated ? (
