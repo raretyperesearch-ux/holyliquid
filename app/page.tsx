@@ -396,6 +396,19 @@ export default function HolyLiquid() {
     })
   }
 
+  // Compact $k/$M formatting for the live heat stat (Round Pool).
+  function fmtCompactUsd(n: number | undefined | null): string {
+    if (n === undefined || n === null || !Number.isFinite(n)) return '---'
+    if (n >= 1_000_000) return `$${(n / 1_000_000).toFixed(1)}M`
+    if (n >= 1_000)     return `$${(n / 1_000).toFixed(1)}k`
+    return `$${n.toFixed(0)}`
+  }
+
+  // Total pot for the current round — sum of both sides' pools.
+  const roundPool = round
+    ? Number(round.pos_pool ?? 0) + Number(round.neg_pool ?? 0)
+    : null
+
   const ctxCountdownLabel = phase === 'betting' ? 'LOCK IN'
     : phase === 'watching' ? 'CLOSES'
     : phase === 'settled' ? 'RESULT'
@@ -413,6 +426,24 @@ export default function HolyLiquid() {
         ? (Number(myBet.actual_winnings ?? myBet.estimated_winnings ?? myBet.amount) - Number(myBet.amount))
         : -Number(myBet.amount))
     : 0
+
+  // Estimated payout for the CURRENTLY-SELECTED bet (before placement).
+  // Mirrors the server's formula in app/api/rounds/current/route.ts:
+  //   payout = amount + (amount / winPool) * (losePool * 0.95)
+  // We add the user's own stake to the winning pool first (since placing
+  // the bet would do that), so the preview reflects post-placement odds.
+  // Returns TOTAL payout (includes the original stake), so the UI label
+  // is "Est. payout", not "Est. profit".
+  const estPayout = useMemo<number | null>(() => {
+    if (!round || !selectedSide || selectedChip <= 0) return null
+    const winPool  = Number(selectedSide === 'pos' ? round.pos_pool : round.neg_pool)
+    const losePool = Number(selectedSide === 'pos' ? round.neg_pool : round.pos_pool)
+    const winPoolWithMe = winPool + selectedChip
+    if (winPoolWithMe <= 0) return selectedChip
+    // If no opponents yet, you just get your stake back
+    if (losePool <= 0) return selectedChip
+    return selectedChip + (selectedChip / winPoolWithMe) * (losePool * 0.95)
+  }, [round?.pos_pool, round?.neg_pool, selectedSide, selectedChip])
 
   // Base marquee — reflects current round lifecycle. Transient events
   // (deposit credited, bet placed, settle result) override this via
@@ -452,6 +483,18 @@ export default function HolyLiquid() {
     : isLocked ? 'Betting Closed'
     : !selectedSide ? 'Select Side'
     : `${selectedSide === 'pos' ? '+PNL' : '−PNL'} · $${selectedChip} · Place Bet`
+
+  // Sub-line under the main confirm button. When a bet is primed, shows
+  // the estimated total payout (includes stake). Otherwise shows a
+  // state-aware hint so the button never reads empty.
+  const cfmSub = betting ? ''
+    : phase === 'watching' ? 'Bets locked — next round coming up'
+    : phase === 'settled'  ? 'Round over — awaiting next'
+    : phase === 'void'     ? 'Round was voided'
+    : isLocked             ? 'Betting window closed'
+    : !selectedSide        ? 'Pick a side to see est. payout'
+    : estPayout !== null   ? `Est. payout $${fmt(estPayout)}`
+    : 'Pick a side to see est. payout'
 
   return (
     <div className="hl-root">
@@ -521,10 +564,10 @@ export default function HolyLiquid() {
               <div className="isl account-isl">
                 <button className="acct-btn deposit" onClick={openDeposit}>Deposit</button>
                 <div className="acct-bal">
-                  <div className="bl">Balance</div>
+                  <div className="bl">Available</div>
                   <div className="bv">{balance !== null ? `$${fmt(balance)}` : '---'}</div>
                 </div>
-                <button className="acct-btn withdraw" onClick={openWithdraw}>Withdraw</button>
+                <button className="acct-btn withdraw" onClick={openWithdraw}>Cash Out</button>
               </div>
             )}
           </div>
@@ -565,7 +608,7 @@ export default function HolyLiquid() {
           <span className="pnl-round">Round #{round?.round_number ?? '---'}</span>
         </div>
 
-        {/* CONTEXT STRIP: Entry / Now / Lock-in */}
+        {/* CONTEXT STRIP: Entry / Now / Pool / Lock-in */}
         <div className="isl ctx-isl">
           <div className="ctx-col">
             <div className="ctx-lbl">Entry</div>
@@ -577,6 +620,11 @@ export default function HolyLiquid() {
             <div className={`ctx-val${round ? (pnlPos ? ' pos' : ' neg') : ''}`}>
               {fmtPrice(round?.current_price)}
             </div>
+          </div>
+          <div className="ctx-div" />
+          <div className="ctx-col">
+            <div className="ctx-lbl">Pool</div>
+            <div className="ctx-val ctx-pool">{fmtCompactUsd(roundPool)}</div>
           </div>
           <div className="ctx-div" />
           <div className="ctx-col">
@@ -610,8 +658,9 @@ export default function HolyLiquid() {
 
         {/* BET PANEL */}
         {!authenticated ? (
-          <button className="cfm-isl rdy" onClick={login} style={{ letterSpacing: '.2em' }}>
-            Connect to Play
+          <button className="cfm-isl rdy" onClick={login}>
+            <span className="cfm-main">Connect to Play</span>
+            <span className="cfm-sub">Sign in with your wallet</span>
           </button>
         ) : phase === 'settled' && myBet ? (
           // Settled round with a bet → show a dramatic result card
@@ -636,8 +685,10 @@ export default function HolyLiquid() {
             </div>
           </div>
         ) : (
-          <>
-            {/* ISLAND 4: Chips */}
+          // Unified "betting ritual" — tighter vertical gap, numbered steps
+          // read as one composition instead of three floating islands.
+          <div className="bet-panel">
+            {/* STEP 1 — Chips */}
             <div className="isl chips-isl">
               <div className="ci-lbl">Bet Amount</div>
               <div className="chips-row">
@@ -665,7 +716,7 @@ export default function HolyLiquid() {
               </div>
             </div>
 
-            {/* ISLANDS 5a & 5b */}
+            {/* STEP 2 — Side buttons */}
             <div className="btns-row">
               <button
                 className={`sb sb-pos${selectedSide === 'pos' ? ' on' : ''}${isLocked ? ' sb-locked' : ''}`}
@@ -685,15 +736,16 @@ export default function HolyLiquid() {
               >−PNL</button>
             </div>
 
-            {/* ISLAND 6: Confirm */}
+            {/* STEP 3 — Confirm (two-line: main + est payout sub-line) */}
             <button
               className={`cfm-isl${selectedSide && !isLocked ? ' rdy' : ''}`}
               disabled={!selectedSide || isLocked || betting}
               onClick={placeBet}
             >
-              {cfmText}
+              <span className="cfm-main">{cfmText}</span>
+              {cfmSub && <span className="cfm-sub">{cfmSub}</span>}
             </button>
-          </>
+          </div>
         )}
         </div>
       </div>

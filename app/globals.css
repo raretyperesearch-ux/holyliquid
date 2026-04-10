@@ -192,16 +192,35 @@ html, body, #__next { width: 100%; height: 100%; }
 .sb-neg.on { background:linear-gradient(180deg,rgba(150,28,60,.9),rgba(70,8,28,.97));border-color:rgba(255,124,152,.5);color:#fff;animation:rglow 1.8s ease-in-out infinite;transform:translateY(-2px) }
 .sb:disabled { opacity:0.35;cursor:not-allowed }
 
+/* ── BET PANEL WRAPPER — tighter internal gap so chips → sides → confirm
+      read as one betting ritual instead of three floating islands. ── */
+.bet-panel {
+  width:100%;
+  display:flex;
+  flex-direction:column;
+  gap:6px;
+}
+
 /* CONFIRM ISLAND */
 .cfm-isl {
-  width:100%;padding:17px;border-radius:22px;
-  font-size:15px;font-weight:900;letter-spacing:.26em;text-transform:uppercase;
+  width:100%;padding:13px 18px;border-radius:22px;
+  display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;
+  text-transform:uppercase;
   cursor:not-allowed;transition:all .15s;
   backdrop-filter:blur(22px);-webkit-backdrop-filter:blur(22px);
   border:0.5px solid rgba(255,255,255,.08);
   background:rgba(255,255,255,.04);
   color:rgba(255,255,255,.2);
   box-shadow:inset 0 1px 0 rgba(255,255,255,.06);
+  font-family:inherit;
+}
+.cfm-main {
+  font-size:14px;font-weight:900;letter-spacing:.24em;line-height:1.1;
+}
+.cfm-sub {
+  font-size:9px;font-weight:700;letter-spacing:.14em;line-height:1.1;
+  opacity:.58;
+  font-variant-numeric:tabular-nums;
 }
 @keyframes cfmShine {
   0%,100% { box-shadow:inset 0 1px 0 rgba(255,255,255,.34),0 18px 40px rgba(63,30,255,.3),0 6px 0 #1A0C66 }
@@ -213,6 +232,7 @@ html, body, #__next { width: 100%; height: 100%; }
   box-shadow:inset 0 1px 0 rgba(255,255,255,.34),0 18px 40px rgba(63,30,255,.3),0 6px 0 #1A0C66;
   animation:cfmShine 2.6s ease-in-out infinite;
 }
+.cfm-isl.rdy .cfm-sub { opacity:.72 }
 .cfm-isl.rdy:hover { transform:translateY(-2px);box-shadow:inset 0 1px 0 rgba(255,255,255,.34),0 24px 48px rgba(63,30,255,.42),0 6px 0 #1A0C66;animation:none }
 .cfm-isl.rdy:active { transform:translateY(4px);box-shadow:inset 0 1px 0 rgba(255,255,255,.22),0 6px 18px rgba(63,30,255,.22),0 2px 0 #1A0C66;animation:none }
 
@@ -265,33 +285,36 @@ html, body, #__next { width: 100%; height: 100%; }
   animation:flashIn .3s ease-out;
 }
 
-/* ── ACCOUNT ISLAND (header) ── */
+/* ── ACCOUNT ISLAND (header) — demoted so the balance reads as account
+      info, not the hero number. The round stats in the main column are
+      the scoreboard; this is just wallet controls. ── */
 .account-isl {
   display:flex;align-items:center;gap:0;
-  padding:6px;
-  border-radius:18px;
+  padding:4px;
+  border-radius:14px;
+  background:rgba(255,255,255,.035);
 }
 .acct-btn {
-  background:rgba(255,255,255,.04);
-  border:0.5px solid rgba(255,255,255,.08);
-  color:rgba(255,255,255,.7);
-  font-size:9px;font-weight:700;letter-spacing:.18em;text-transform:uppercase;
-  padding:8px 12px;border-radius:13px;
+  background:transparent;
+  border:0.5px solid rgba(255,255,255,.07);
+  color:rgba(255,255,255,.55);
+  font-size:8.5px;font-weight:700;letter-spacing:.18em;text-transform:uppercase;
+  padding:6px 10px;border-radius:10px;
   cursor:pointer;
   transition:background .15s,color .15s,border-color .15s,transform .12s;
 }
-.acct-btn:hover { background:rgba(255,255,255,.08);color:#fff;border-color:rgba(123,44,255,.45) }
+.acct-btn:hover { background:rgba(255,255,255,.06);color:rgba(255,255,255,.9);border-color:rgba(123,44,255,.4) }
 .acct-btn:active { transform:translateY(1px) }
-.acct-btn.deposit:hover { border-color:rgba(125,242,168,.45);color:#7df2a8 }
-.acct-btn.withdraw:hover { border-color:rgba(255,180,80,.45);color:#ffc878 }
+.acct-btn.deposit:hover  { border-color:rgba(125,242,168,.4);color:#7df2a8 }
+.acct-btn.withdraw:hover { border-color:rgba(255,180,80,.4);color:#ffc878 }
 .acct-bal {
-  padding:0 14px;text-align:center;min-width:88px;
-  border-left:0.5px solid rgba(255,255,255,.08);
-  border-right:0.5px solid rgba(255,255,255,.08);
-  margin:0 4px;
+  padding:0 11px;text-align:center;min-width:70px;
+  border-left:0.5px solid rgba(255,255,255,.06);
+  border-right:0.5px solid rgba(255,255,255,.06);
+  margin:0 3px;
 }
-.acct-bal .bl { font-size:7px;letter-spacing:.3em;color:rgba(255,255,255,.35);text-transform:uppercase }
-.acct-bal .bv { font-size:14px;font-weight:700;margin-top:2px;font-variant-numeric:tabular-nums }
+.acct-bal .bl { font-size:6.5px;letter-spacing:.28em;color:rgba(255,255,255,.3);text-transform:uppercase }
+.acct-bal .bv { font-size:11px;font-weight:600;margin-top:2px;color:rgba(255,255,255,.72);font-variant-numeric:tabular-nums }
 
 /* ── LOCK STATES ── */
 @keyframes lockingPulse {
@@ -330,21 +353,21 @@ html, body, #__next { width: 100%; height: 100%; }
 .settle-flash.win  { animation:settleFlashWin 1.25s ease-out forwards }
 .settle-flash.loss { animation:settleFlashLoss 1.25s ease-out forwards }
 
-/* ── CONTEXT STRIP (entry / now / lock-in) ── */
+/* ── CONTEXT STRIP (entry / now / pool / lock-in) ── */
 .ctx-isl {
   display:flex;align-items:center;justify-content:space-between;
-  padding:10px 18px;width:100%;gap:8px;
+  padding:10px 12px;width:100%;gap:4px;
 }
 .ctx-col {
   flex:1;text-align:center;min-width:0;
 }
 .ctx-lbl {
-  font-size:7px;letter-spacing:.32em;
+  font-size:6.5px;letter-spacing:.28em;
   color:rgba(255,255,255,.32);text-transform:uppercase;
   margin-bottom:2px;
 }
 .ctx-val {
-  font-size:13px;font-weight:700;
+  font-size:12px;font-weight:700;
   font-variant-numeric:tabular-nums;
   color:rgba(255,255,255,.85);
   white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
@@ -352,12 +375,13 @@ html, body, #__next { width: 100%; height: 100%; }
 }
 .ctx-val.pos { color:#7df2a8 }
 .ctx-val.neg { color:#ff7c98 }
+.ctx-val.ctx-pool { color:#c4a8ff }
 .ctx-val.locking-soon {
   color:#FFB84D !important;
   animation:lockingPulse .55s ease-in-out infinite;
 }
 .ctx-div {
-  width:1px;height:22px;
+  width:1px;height:20px;
   background:rgba(255,255,255,.08);
   flex-shrink:0;
 }
