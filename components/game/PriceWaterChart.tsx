@@ -34,20 +34,20 @@ export default function PriceWaterChart({ priceHistory, pnlPos }: Props) {
     const parent = cv.parentElement!
 
     const applySize = () => {
-      // Walk up to find hl-root for reliable width
-      const root = cv.closest('.hl-root') as HTMLElement || parent
-      const W = root.clientWidth || window.innerWidth
-      const H = parent.clientHeight || 180
-      cv.width  = W * devicePixelRatio
-      cv.height = H * devicePixelRatio
-      cv.style.width  = W + 'px'
-      cv.style.height = H + 'px'
-      stateRef.current.boatX = W * 0.62
+      // getBoundingClientRect gets the actual CSS-rendered size — reliable after layout
+      const rect = cv.getBoundingClientRect()
+      if (rect.width === 0) return  // not in DOM yet, skip
+      // Set pixel buffer to match rendered size × DPR
+      // Do NOT touch cv.style.width/height — CSS controls display size
+      cv.width  = Math.round(rect.width  * devicePixelRatio)
+      cv.height = Math.round(rect.height * devicePixelRatio)
+      stateRef.current.boatX = rect.width * 0.62
     }
-    // Defer so layout has settled
+    // rAF defers until after first paint so CSS sizes are settled
     const resize = () => requestAnimationFrame(applySize)
     resize()
     window.addEventListener('resize', resize)
+    // ResizeObserver catches container size changes (orientation, zoom, etc)
     const ro = new ResizeObserver(resize)
     ro.observe(parent)
 
@@ -130,8 +130,10 @@ export default function PriceWaterChart({ priceHistory, pnlPos }: Props) {
       const chop = lerp(1.85, 1, B)
 
       const ctx2 = cv!.getContext('2d')!
+      // Always read from canvas buffer — stays in sync with applySize
       const W = cv!.width  / devicePixelRatio
       const H = cv!.height / devicePixelRatio
+      if (W === 0 || H === 0) return  // not sized yet
       ctx2.clearRect(0, 0, W, H)
 
       // Init cloud X positions once
@@ -414,7 +416,12 @@ export default function PriceWaterChart({ priceHistory, pnlPos }: Props) {
   return (
     <canvas
       ref={canvasRef}
-      style={{ display: 'block', width: '100%', height: '100%' }}
+      style={{
+        display: 'block',
+        width: '100%',       // CSS fills parent width
+        height: '100%',      // CSS fills parent height (parent must have explicit height)
+        verticalAlign: 'top' // prevent inline gap
+      }}
     />
   )
 }
