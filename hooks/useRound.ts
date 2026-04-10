@@ -41,7 +41,7 @@ export function useRound(accessToken: string | null) {
   const [myBet, setMyBet] = useState<MyBet | null>(null)
   const [loading, setLoading] = useState(true)
   const lastVersionRef = useRef(0)
-  const intervalRef = useRef<NodeJS.Timeout>()
+  const intervalRef = useRef<NodeJS.Timeout | undefined>(undefined)
 
   const fetchRound = async () => {
     try {
