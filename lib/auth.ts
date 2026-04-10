@@ -17,13 +17,18 @@ export async function verifyAuth(req: NextRequest): Promise<string> {
   const token = req.headers.get('authorization')?.replace('Bearer ', '')
   if (!token) throw new Error('Missing authorization token')
 
+  // Step 1: verify the JWT and get the user ID
   const claims = await getPrivy().verifyAuthToken(token)
-  const wallet = claims.linkedAccounts?.find(
-    (a: any) => a.type === 'wallet' && a.chainType === 'ethereum'
-  )?.address
 
-  if (!wallet) throw new Error('No wallet linked to account')
-  return wallet.toLowerCase()
+  // Step 2: fetch the full user to get linked accounts
+  const user = await getPrivy().getUser(claims.userId)
+
+  const walletAccount = user.linkedAccounts?.find(
+    (a: any) => a.type === 'wallet' && a.chainType === 'ethereum'
+  ) as any
+
+  if (!walletAccount?.address) throw new Error('No wallet linked to account')
+  return walletAccount.address.toLowerCase()
 }
 
 export function unauthorized(message = 'Unauthorized') {
