@@ -1,180 +1,187 @@
 'use client'
 import { useEffect, useRef } from 'react'
 
-interface GameCanvasProps {
-  pnlPct: number
-  currentPrice: number
-  priceHistory: number[]
+interface Props {
+  waterLevel: number  // -2.5 to 2.8, drives tide
+  onWaterPct: (pct: number) => void  // callback to sync CSS water height
 }
 
-export default function GameCanvas({ pnlPct, currentPrice, priceHistory }: GameCanvasProps) {
-  const mountRef = useRef<HTMLDivElement>(null)
-  const sceneRef = useRef<any>(null)
+export default function GameCanvas({ waterLevel, onWaterPct }: Props) {
+  const canvasRef = useRef<HTMLCanvasElement>(null)
+  const stateRef = useRef({ curWL: 0, targWL: waterLevel })
+
+  // Keep targWL in sync
+  useEffect(() => {
+    stateRef.current.targWL = waterLevel
+  }, [waterLevel])
 
   useEffect(() => {
-    if (!mountRef.current) return
-
+    const cv = canvasRef.current
+    if (!cv) return
+    const root = cv.parentElement!
+    const CW = root.clientWidth || 390
+    const CH = root.clientHeight || 720
     let animId: number
-    let THREE: any
 
     async function init() {
-      // Dynamic import to avoid SSR
-      THREE = await import('three').then(m => m)
+      const THREE = await import('three')
 
-      const mount = mountRef.current!
-      const W = mount.clientWidth
-      const H = mount.clientHeight
+      cv!.width = CW * devicePixelRatio
+      cv!.height = CH * devicePixelRatio
+      cv!.style.cssText = `position:absolute;inset:0;width:${CW}px;height:${CH}px`
 
-      // Renderer
-      const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false })
-      renderer.setSize(W, H)
-      renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2))
-      renderer.setClearColor(0x030310)
-      mount.appendChild(renderer.domElement)
+      const renderer = new THREE.WebGLRenderer({ canvas: cv!, antialias: true, alpha: false })
+      renderer.setSize(CW, CH)
+      renderer.setPixelRatio(devicePixelRatio)
+      renderer.setClearColor(0x05050a, 1)
 
-      // Scene
       const scene = new THREE.Scene()
-      scene.fog = new THREE.FogExp2(0x030310, 0.035)
+      scene.fog = new THREE.Fog(0x05050a, 18, 40)
 
-      // Camera
-      const camera = new THREE.PerspectiveCamera(60, W / H, 0.1, 200)
-      camera.position.set(0, 8, 18)
-      camera.lookAt(0, 0, 0)
+      const cam = new THREE.PerspectiveCamera(52, CW / CH, 0.1, 60)
+      cam.position.set(0, 1.2, 10)
+      cam.lookAt(0, -1, 0)
 
-      // Lights
-      const ambient = new THREE.AmbientLight(0x1a1aff, 0.3)
-      scene.add(ambient)
+      // Background plane
+      const bgMesh = new THREE.Mesh(
+        new THREE.PlaneGeometry(40, 22),
+        new THREE.MeshBasicMaterial({ color: 0x070911 })
+      )
+      bgMesh.position.set(0, 2, -18)
+      scene.add(bgMesh)
 
-      const dirLight = new THREE.DirectionalLight(0x7b2cff, 1.5)
-      dirLight.position.set(5, 10, 5)
-      scene.add(dirLight)
+      // Glow spheres
+      const gBlue = new THREE.Mesh(
+        new THREE.SphereGeometry(4, 16, 16),
+        new THREE.MeshBasicMaterial({ color: 0x1A1AFF, transparent: true, opacity: 0.1 })
+      )
+      gBlue.position.set(-5, 5, -12)
+      scene.add(gBlue)
 
-      const rimLight = new THREE.DirectionalLight(0x1a1aff, 2)
-      rimLight.position.set(-5, 2, -10)
-      scene.add(rimLight)
-
-      // Ocean plane
-      const GRID = 80
-      const SIZE = 40
-      const geo = new THREE.PlaneGeometry(SIZE, SIZE, GRID, GRID)
-      geo.rotateX(-Math.PI / 2)
-      const posAttr = geo.attributes.position
-
-      const mat = new THREE.MeshStandardMaterial({
-        color: 0x050530,
-        metalness: 0.9,
-        roughness: 0.1,
-        wireframe: false,
-      })
-      const ocean = new THREE.Mesh(geo, mat)
-      scene.add(ocean)
-
-      // Price line (glowing)
-      const lineGeo = new THREE.BufferGeometry()
-      const linePoints = new Float32Array(60 * 3)
-      lineGeo.setAttribute('position', new THREE.BufferAttribute(linePoints, 3))
-      const lineMat = new THREE.LineBasicMaterial({ color: 0x7df2a8, linewidth: 2 })
-      const priceLine = new THREE.Line(lineGeo, lineMat)
-      priceLine.position.y = 0.5
-      scene.add(priceLine)
+      const gPurp = new THREE.Mesh(
+        new THREE.SphereGeometry(3.5, 16, 16),
+        new THREE.MeshBasicMaterial({ color: 0x7B2CFF, transparent: true, opacity: 0.09 })
+      )
+      gPurp.position.set(6, 4, -14)
+      scene.add(gPurp)
 
       // Stars
-      const starGeo = new THREE.BufferGeometry()
-      const starVerts = new Float32Array(3000)
-      for (let i = 0; i < 3000; i += 3) {
-        starVerts[i]     = (Math.random() - 0.5) * 200
-        starVerts[i + 1] = Math.random() * 80 + 5
-        starVerts[i + 2] = (Math.random() - 0.5) * 200
+      const sp = new Float32Array(150 * 3)
+      for (let i = 0; i < 150; i++) {
+        sp[i*3] = (Math.random() - 0.5) * 30
+        sp[i*3+1] = Math.random() * 12 + 1
+        sp[i*3+2] = (Math.random() - 0.5) * 14 - 4
       }
-      starGeo.setAttribute('position', new THREE.BufferAttribute(starVerts, 3))
-      const starMat = new THREE.PointsMaterial({ color: 0xffffff, size: 0.15, transparent: true, opacity: 0.6 })
-      scene.add(new THREE.Points(starGeo, starMat))
+      const sg = new THREE.BufferGeometry()
+      sg.setAttribute('position', new THREE.BufferAttribute(sp, 3))
+      scene.add(new THREE.Points(sg, new THREE.PointsMaterial({ color: 0xffffff, size: 0.055, sizeAttenuation: true, transparent: true, opacity: 0.4 })))
 
-      sceneRef.current = { renderer, scene, camera, ocean, priceLine, posAttr }
+      // Boat
+      const boatGrp = new THREE.Group()
+      const hs = new THREE.Shape()
+      hs.moveTo(-1.15, .02)
+      hs.bezierCurveTo(-1.12, -.06, -1.05, -.18, -.9, -.22)
+      hs.bezierCurveTo(-.45, -.32, .4, -.30, .86, -.18)
+      hs.bezierCurveTo(1.0, -.1, 1.08, .0, 1.12, .1)
+      hs.lineTo(1.06, .34)
+      hs.bezierCurveTo(.45, .38, -.45, .34, -1.0, .28)
+      hs.closePath()
 
-      // Resize handler
-      const onResize = () => {
-        const w = mount.clientWidth
-        const h = mount.clientHeight
-        camera.aspect = w / h
-        camera.updateProjectionMatrix()
-        renderer.setSize(w, h)
+      const hGeo = new THREE.ExtrudeGeometry(hs, { depth: .7, bevelEnabled: true, bevelThickness: .025, bevelSize: .02, bevelSegments: 2 })
+      hGeo.translate(0, 0, -.35)
+      boatGrp.add(new THREE.Mesh(hGeo, new THREE.MeshStandardMaterial({ color: 0x6B3D18, roughness: .8, metalness: .06 })))
+
+      const deck = new THREE.Mesh(new THREE.BoxGeometry(2.3, .04, .74), new THREE.MeshStandardMaterial({ color: 0xDDD8CC, roughness: .9 }))
+      deck.position.set(0, .02, 0)
+      boatGrp.add(deck)
+
+      const planks = new THREE.Mesh(new THREE.BoxGeometry(2.08, .055, .63), new THREE.MeshStandardMaterial({ color: 0xC0804A, roughness: .85 }))
+      planks.position.set(0, .27, 0)
+      boatGrp.add(planks)
+
+      const mast = new THREE.Mesh(new THREE.CylinderGeometry(.022, .03, 2.4, 8), new THREE.MeshStandardMaterial({ color: 0x3E2008, roughness: .75 }))
+      mast.position.set(-.06, 1.52, 0)
+      boatGrp.add(mast)
+
+      const sv = new Float32Array([-.06, .28, .02, -.06, 2.38, .02, 1.04, .46, .02])
+      const sGeo = new THREE.BufferGeometry()
+      sGeo.setAttribute('position', new THREE.BufferAttribute(sv, 3))
+      sGeo.setIndex([0, 2, 1, 0, 1, 2])
+      sGeo.computeVertexNormals()
+      boatGrp.add(new THREE.Mesh(sGeo, new THREE.MeshStandardMaterial({ color: 0xFFFAF2, side: THREE.DoubleSide, roughness: .82, transparent: true, opacity: .92 })))
+
+      const jv = new Float32Array([-.06, 1.1, .02, -.06, 2.36, .02, -1.02, .32, .02])
+      const jGeo = new THREE.BufferGeometry()
+      jGeo.setAttribute('position', new THREE.BufferAttribute(jv, 3))
+      jGeo.setIndex([0, 2, 1, 0, 1, 2])
+      jGeo.computeVertexNormals()
+      boatGrp.add(new THREE.Mesh(jGeo, new THREE.MeshStandardMaterial({ color: 0xF5F0E8, side: THREE.DoubleSide, roughness: .84, transparent: true, opacity: .88 })))
+
+      const flag = new THREE.Mesh(new THREE.BoxGeometry(.2, .1, .02), new THREE.MeshStandardMaterial({ color: 0x7B2CFF }))
+      flag.position.set(.05, 2.58, 0)
+      boatGrp.add(flag)
+
+      const silMat = new THREE.MeshStandardMaterial({ color: 0x0f1520, roughness: 1 })
+      const body = new THREE.Mesh(new THREE.CylinderGeometry(.08, .1, .25, 8), silMat)
+      body.position.set(-.55, .52, 0)
+      boatGrp.add(body)
+
+      const head = new THREE.Mesh(new THREE.SphereGeometry(.095, 10, 10), silMat)
+      head.position.set(-.54, .7, 0)
+      boatGrp.add(head)
+
+      const brim = new THREE.Mesh(new THREE.CylinderGeometry(.18, .18, .03, 12), silMat)
+      brim.position.set(-.54, .79, 0)
+      boatGrp.add(brim)
+
+      const tophat = new THREE.Mesh(new THREE.CylinderGeometry(.09, .11, .12, 12), silMat)
+      tophat.position.set(-.54, .86, 0)
+      boatGrp.add(tophat)
+
+      const rod = new THREE.Mesh(new THREE.CylinderGeometry(.012, .017, 1.4, 6), new THREE.MeshStandardMaterial({ color: 0x7B5B14, roughness: .65 }))
+      rod.rotation.z = -Math.PI / 2.5
+      rod.position.set(.18, .9, 0)
+      boatGrp.add(rod)
+
+      boatGrp.position.set(.15, 0, -.2)
+      boatGrp.rotation.y = .1
+      scene.add(boatGrp)
+
+      scene.add(new THREE.AmbientLight(0xffffff, .65))
+      const dl1 = new THREE.DirectionalLight(0x9090ff, 1.0)
+      dl1.position.set(-3, 8, 4)
+      scene.add(dl1)
+      const dl2 = new THREE.DirectionalLight(0x6644ff, .5)
+      dl2.position.set(4, 3, -2)
+      scene.add(dl2)
+
+      function syncWater(curWL: number) {
+        const wv = new THREE.Vector3(0, curWL, 0)
+        wv.project(cam)
+        const pct = (1 + wv.y) / 2 * 100
+        onWaterPct(Math.max(5, Math.min(92, pct)))
       }
-      window.addEventListener('resize', onResize)
-
-      let t = 0
 
       function animate() {
         animId = requestAnimationFrame(animate)
-        t += 0.008
+        const t = Date.now() * 0.001
+        const state = stateRef.current
+        state.curWL += (state.targWL - state.curWL) * 0.025
 
-        // Animate ocean vertices
-        const pos = posAttr
-        for (let i = 0; i < pos.count; i++) {
-          const x = pos.getX(i)
-          const z = pos.getZ(i)
-          const wave =
-            Math.sin(x * 0.5 + t * 1.2) * 0.4 +
-            Math.sin(z * 0.4 + t * 0.9) * 0.3 +
-            Math.sin((x + z) * 0.3 + t * 1.5) * 0.2
-          pos.setY(i, wave)
-        }
-        pos.needsUpdate = true
-        ocean.geometry.computeVertexNormals()
-
-        // Subtle camera drift
-        camera.position.x = Math.sin(t * 0.1) * 1.5
-        camera.position.y = 8 + Math.sin(t * 0.15) * 0.5
-        camera.lookAt(0, 0, 0)
-
-        // Update ocean color based on PnL
-        const isPos = pnlPct >= 0
-        const targetColor = isPos ? 0x051a20 : 0x1a0510
-        mat.color.lerp(new THREE.Color(targetColor), 0.02)
-        const lineColor = isPos ? 0x7df2a8 : 0xff7c98
-        ;(lineMat as any).color.lerp(new THREE.Color(lineColor), 0.05)
-
-        renderer.render(scene, camera)
+        const wh = Math.sin(.15 * .6 + t * 2.1) * .2 + Math.sin(-.2 * .5 + t * 1.65) * .13
+        boatGrp.position.y = state.curWL + wh
+        boatGrp.rotation.z = Math.sin(t * 1.3) * .022 + Math.cos(t * .85) * .015
+        syncWater(state.curWL)
+        renderer.render(scene, cam)
       }
-
       animate()
-
-      return () => {
-        window.removeEventListener('resize', onResize)
-        cancelAnimationFrame(animId)
-        renderer.dispose()
-        if (mount.contains(renderer.domElement)) {
-          mount.removeChild(renderer.domElement)
-        }
-      }
     }
 
-    const cleanup = init()
+    init()
     return () => {
       cancelAnimationFrame(animId)
-      cleanup.then(fn => fn?.())
     }
   }, [])
 
-  // Update price line when history changes
-  useEffect(() => {
-    if (!sceneRef.current || priceHistory.length < 2) return
-    const { priceLine } = sceneRef.current
-    const positions = priceLine.geometry.attributes.position
-    const n = Math.min(priceHistory.length, 60)
-    const minP = Math.min(...priceHistory)
-    const maxP = Math.max(...priceHistory)
-    const range = maxP - minP || 1
-
-    for (let i = 0; i < 60; i++) {
-      const idx = Math.floor((i / 60) * n)
-      const price = priceHistory[idx] ?? priceHistory[priceHistory.length - 1]
-      const x = (i / 59) * 30 - 15
-      const y = ((price - minP) / range) * 3 - 1.5
-      positions.setXYZ(i, x, y, 0)
-    }
-    positions.needsUpdate = true
-  }, [priceHistory])
-
-  return <div ref={mountRef} style={{ width: '100%', height: '100%', position: 'absolute', inset: 0 }} />
+  return <canvas ref={canvasRef} className="hl-canvas" />
 }
