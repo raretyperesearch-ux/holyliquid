@@ -26,19 +26,44 @@ def get_oracle_status():
         "stale": stale,
     }
 
+def extract_price(raw) -> float:
+    """Safely extract a float price from whatever the SDK returns."""
+    if isinstance(raw, (int, float)):
+        return float(raw)
+    if isinstance(raw, str):
+        return float(raw)
+    if isinstance(raw, dict):
+        for key in ("price", "value", "current", "p"):
+            if key in raw:
+                return extract_price(raw[key])
+        for v in raw.values():
+            if isinstance(v, (int, float, str)):
+                try:
+                    return float(v)
+                except (ValueError, TypeError):
+                    continue
+    for attr in ("price", "value", "current"):
+        if hasattr(raw, attr):
+            return extract_price(getattr(raw, attr))
+    raise ValueError(f"Cannot extract price from: {type(raw)} = {raw}")
+
 def make_handler(pair: str):
     def handler(data):
         global _last_update_ms, _connected
-        now = datetime.now(timezone.utc)
-        cache[pair] = {
-            "pair":      pair,
-            "price":     float(data.price),
-            "timestamp": now.isoformat(),
-            "ts_ms":     int(now.timestamp() * 1000),
-        }
-        _last_update_ms = int(now.timestamp() * 1000)
-        _connected = True
-        print(f"[Oracle] {pair}: ${data.price:.4f}")
+        try:
+            price = extract_price(data.price)
+            now = datetime.now(timezone.utc)
+            cache[pair] = {
+                "pair":      pair,
+                "price":     price,
+                "timestamp": now.isoformat(),
+                "ts_ms":     int(now.timestamp() * 1000),
+            }
+            _last_update_ms = int(now.timestamp() * 1000)
+            _connected = True
+            print(f"[Oracle] {pair}: ${price:.4f}")
+        except Exception as e:
+            print(f"[Oracle] Handler error for {pair}: {e} | raw type: {type(data.price)} val: {data.price}")
     return handler
 
 def ws_error_handler(e):
@@ -56,7 +81,6 @@ async def start_feed():
     while True:
         try:
             print("[Oracle] Connecting to Pyth price feed...")
-            # FeedClient uses wss://hermes.pyth.network/ws by default — no RPC URL needed
             client = FeedClient(
                 on_error=ws_error_handler,
                 on_close=ws_close_handler,
