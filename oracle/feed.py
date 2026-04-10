@@ -1,6 +1,5 @@
 from avantis_trader_sdk import FeedClient
 from datetime import datetime, timezone
-import os
 import asyncio
 
 PAIRS = ["ETH/USD", "BTC/USD", "SOL/USD"]
@@ -39,21 +38,34 @@ def make_handler(pair: str):
         }
         _last_update_ms = int(now.timestamp() * 1000)
         _connected = True
+        print(f"[Oracle] {pair}: ${data.price:.4f}")
     return handler
+
+def ws_error_handler(e):
+    global _connected
+    _connected = False
+    print(f"[Oracle] WebSocket error: {e}")
+
+def ws_close_handler(e):
+    global _connected
+    _connected = False
+    print(f"[Oracle] WebSocket closed: {e}")
 
 async def start_feed():
     global _connected
-    rpc = os.getenv("BASE_RPC_URL", "https://mainnet.base.org")
     while True:
         try:
-            print(f"[Oracle] Connecting to Avantis feed via {rpc}")
-            client = FeedClient(rpc)
+            print("[Oracle] Connecting to Pyth price feed...")
+            # FeedClient uses wss://hermes.pyth.network/ws by default — no RPC URL needed
+            client = FeedClient(
+                on_error=ws_error_handler,
+                on_close=ws_close_handler,
+            )
             for pair in PAIRS:
                 client.register_price_feed_callback(pair, make_handler(pair))
-            _connected = True
-            print("[Oracle] Feed connected. Listening for prices...")
+            print(f"[Oracle] Subscribed to: {', '.join(PAIRS)}")
             await client.listen_for_price_updates()
         except Exception as e:
             _connected = False
-            print(f"[Oracle] Feed disconnected: {e}. Reconnecting in 3s...")
+            print(f"[Oracle] Feed error: {e}. Reconnecting in 3s...")
             await asyncio.sleep(3)
