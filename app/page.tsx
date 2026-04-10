@@ -197,8 +197,14 @@ export default function HolyLiquid() {
           </div>
         </div>
 
-        {/* BOAT ZONE — chart lives here */}
-        <div className="boat-zone" style={{ minHeight: 160 }}>
+        {/* BOAT ZONE — full bleed, breaks out of hl-ui padding */}
+        <div className="boat-zone" style={{
+          minHeight: 180,
+          width: 'calc(100% + 32px)',
+          marginLeft: -16,
+          marginRight: -16,
+          overflow: 'hidden',
+        }}>
           <PriceWaterChart priceHistory={priceHistory} pnlPos={pnlPos} />
         </div>
 
