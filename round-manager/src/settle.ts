@@ -1,6 +1,7 @@
 import { Round, RoundResult, PriceData } from './types'
 import { db } from './db'
 import { broadcast } from './broadcast'
+import { voidRound } from './void'
 
 const PLATFORM_FEE = 0.05
 
@@ -29,8 +30,21 @@ export async function settleRound(
 ): Promise<void> {
   // Idempotency check
   const current = await db.rounds.get(round.id)
-  if (current.status === 'settled') {
-    console.log(`[Settle] Round #${round.round_number} already settled, skipping`)
+  if (current.status === 'settled' || current.status === 'void') {
+    console.log(`[Settle] Round #${round.round_number} already ${current.status}, skipping`)
+    return
+  }
+
+  // ── Void guard: one-sided rounds ──────────────────────────────
+  // If either side has zero stake, there's no real opposing trade.
+  // Refund every bet via voidRound() instead of pretending someone "won".
+  // Prevents the misleading state where solo players see outcome='win'
+  // but no profit added to their balance.
+  const posPool = Number(round.pos_pool) || 0
+  const negPool = Number(round.neg_pool) || 0
+  if (posPool === 0 || negPool === 0) {
+    console.log(`[Settle] Round #${round.round_number} one-sided (pos=$${posPool}, neg=$${negPool}) — voiding`)
+    await voidRound(round.id, 'one_sided_pool')
     return
   }
 
@@ -38,8 +52,8 @@ export async function settleRound(
   const winningBets = bets.filter(b => b.side === result.winningSide)
   const losingBets  = bets.filter(b => b.side !== result.winningSide)
 
-  const losingPool  = result.winningSide === 'pos' ? round.neg_pool : round.pos_pool
-  const winningPool = result.winningSide === 'pos' ? round.pos_pool : round.neg_pool
+  const losingPool  = result.winningSide === 'pos' ? negPool : posPool
+  const winningPool = result.winningSide === 'pos' ? posPool : negPool
   const fee         = losingPool * PLATFORM_FEE
   const prize       = losingPool * (1 - PLATFORM_FEE)
 
@@ -47,9 +61,6 @@ export async function settleRound(
     ...bet,
     winnings: bet.amount + (winningPool > 0 ? (bet.amount / winningPool) * prize : 0),
   }))
-
-  // Atomic: update round + all bets + all balances
-  const supabase = (await import('./db')).getSupabaseClient()
 
   // Update round status
   await db.rounds.update(round.id, {
@@ -92,6 +103,6 @@ export async function settleRound(
     })
   }
 
-  await broadcast.roundResult(round.id, result, closePrice.price, round.pos_pool, round.neg_pool, fee)
+  await broadcast.roundResult(round.id, result, closePrice.price, posPool, negPool, fee)
   console.log(`[Settle] Round #${round.round_number} settled: ${result.outcome} | PnL: $${result.pnlUsd.toFixed(2)}`)
 }
