@@ -67,7 +67,16 @@ export default function HolyLiquid() {
   const [modalBusy, setModalBusy] = useState(false)
   const [domReady, setDomReady] = useState(false)
   const [recentRounds, setRecentRounds] = useState<HistoryRound[]>([])
+  const [heroFontPx, setHeroFontPx] = useState(52)
+  const [pnlFontPx, setPnlFontPx] = useState(15)
+  const [timerFontPx, setTimerFontPx] = useState(16)
   const audioCtxRef = useRef<AudioContext | null>(null)
+  const heroCardRef = useRef<HTMLDivElement | null>(null)
+  const heroTextRef = useRef<HTMLDivElement | null>(null)
+  const pnlCardRef = useRef<HTMLDivElement | null>(null)
+  const pnlTextRef = useRef<HTMLSpanElement | null>(null)
+  const timerCardRef = useRef<HTMLDivElement | null>(null)
+  const timerTextRef = useRef<HTMLSpanElement | null>(null)
 
   // Settle flash (shown briefly when a round result lands)
   const [settleFlash, setSettleFlash] = useState<'win' | 'loss' | null>(null)
@@ -512,9 +521,44 @@ export default function HolyLiquid() {
   }, 0)
   const proofLine = biggestRecentMult > 0 ? `Biggest recent payout ${biggestRecentMult.toFixed(2)}×` : 'Recent settles loading'
   const heroValue = `$${round ? Math.round(round.current_value).toLocaleString() : '---'}`
-  const heroSize = heroFontSize(heroValue)
   const pnlText = `${pnlPos ? '+' : ''}$${Math.abs(round?.pnl_usd ?? 0).toFixed(2)}`
-  const pnlSize = pnlFontSize(pnlText)
+
+  useEffect(() => {
+    const fitText = (
+      textEl: HTMLElement | null,
+      cardEl: HTMLElement | null,
+      max: number,
+      min: number,
+      setter: (n: number) => void,
+    ) => {
+      if (!textEl || !cardEl) return
+      const width = Math.max(0, cardEl.clientWidth - 18)
+      let size = max
+      textEl.style.fontSize = `${size}px`
+      while (size > min && textEl.scrollWidth > width) {
+        size -= 1
+        textEl.style.fontSize = `${size}px`
+      }
+      setter(size)
+    }
+
+    const runFit = () => {
+      fitText(heroTextRef.current, heroCardRef.current, 52, 18, setHeroFontPx)
+      fitText(pnlTextRef.current, pnlCardRef.current, 15, 10, setPnlFontPx)
+      fitText(timerTextRef.current, timerCardRef.current, 16, 11, setTimerFontPx)
+    }
+
+    runFit()
+    const ro = new ResizeObserver(() => runFit())
+    if (heroCardRef.current) ro.observe(heroCardRef.current)
+    if (pnlCardRef.current) ro.observe(pnlCardRef.current)
+    if (timerCardRef.current) ro.observe(timerCardRef.current)
+    window.addEventListener('resize', runFit)
+    return () => {
+      ro.disconnect()
+      window.removeEventListener('resize', runFit)
+    }
+  }, [heroValue, pnlText, timerDisplay])
 
   return (
     <div className="hl-root">
@@ -576,19 +620,20 @@ export default function HolyLiquid() {
 
         <div className="stats-row">
           {/* ISLAND 1: Position Value */}
-          <div className="isl val-isl">
+          <div className="isl val-isl" ref={heroCardRef}>
             <div className="vi-lbl">{posLabel}</div>
-            <div className={`big-val ${pnlPos ? 'pos' : 'neg'}`} style={{ fontSize: heroSize }}>
+            <div ref={heroTextRef} className={`big-val ${pnlPos ? 'pos' : 'neg'}`} style={{ fontSize: `${heroFontPx}px` }}>
               {heroValue}
             </div>
           </div>
 
           {/* ISLAND 2: PnL */}
-          <div className="isl pnl-isl">
+          <div className="isl pnl-isl" ref={pnlCardRef}>
             <span className="pnl-mini">PnL</span>
             <span
+              ref={pnlTextRef}
               className="pnl-chg"
-              style={{ color: pnlPos ? '#7df2a8' : '#ff7c98', fontSize: pnlSize }}
+              style={{ color: pnlPos ? '#7df2a8' : '#ff7c98', fontSize: `${pnlFontPx}px` }}
             >
               {pnlText}
             </span>
@@ -599,7 +644,7 @@ export default function HolyLiquid() {
           </div>
 
           {/* ISLAND 3: Timer */}
-          <div className="isl timer-isl">
+          <div className="isl timer-isl" ref={timerCardRef}>
             <div className="ti-row">
               <span
                 className={`phase-lbl${isFinalCountdown ? ' locking-soon' : ''}`}
@@ -607,7 +652,7 @@ export default function HolyLiquid() {
               >
                 {phaseLabel}
               </span>
-              <span className={`timer-num${isFinalCountdown ? ' locking-soon' : ''}`}>
+              <span ref={timerTextRef} className={`timer-num${isFinalCountdown ? ' locking-soon' : ''}`} style={{ fontSize: `${timerFontPx}px` }}>
                 {timerDisplay}
               </span>
             </div>
