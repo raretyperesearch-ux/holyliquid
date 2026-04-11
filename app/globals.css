@@ -40,8 +40,8 @@ html, body, #__next { width: 100%; height: 100%; }
   width: 100%;
   max-width: 430px;
   margin: 0 auto;
-  height: 100vh;
-  max-height: 720px;
+  height: 100dvh;
+  max-height: none;
   overflow: hidden;
 }
 
@@ -565,6 +565,31 @@ html, body, #__next { width: 100%; height: 100%; }
   .account-center, .connect-pill, .skeleton-account { grid-column:1 / -1; order:2; }
 }
 
+@media (min-width: 768px) {
+  .hl-root {
+    height: min(100dvh, 720px);
+    max-height: 720px;
+  }
+}
+
+@media (max-width: 767px) {
+  .hl-ui {
+    padding: 9px 11px 8px;
+    gap: 5px;
+  }
+  .stats-row { gap: 5px; }
+  .val-isl, .pnl-isl, .timer-isl { min-height: 88px; }
+  .boat-zone {
+    flex: 1.35;
+    min-height: clamp(128px, 24vh, 230px);
+  }
+  .chips-isl { padding: 8px 10px 9px; }
+  .btns-row { gap: 8px; }
+  .sb { padding: 15px 0; font-size: 18px; }
+  .cfm-isl { padding: 12px 14px; }
+  .history-isl { margin-top: 0; padding: 8px 9px 7px; }
+}
+
 /* ── RESULT CARD (settled bet) ── */
 @keyframes resultFadeIn {
   from { opacity:0;transform:translateY(6px) }
@@ -843,4 +868,34 @@ html, body, #__next { width: 100%; height: 100%; }
 .spotlight-btn.ghost {
   color: rgba(255,255,255,.7);
   background: rgba(255,255,255,.04);
+}
+
+@media (max-width: 767px) {
+  .modal-backdrop {
+    background: rgba(3,5,14,.56);
+    backdrop-filter: blur(12px) saturate(1.15);
+    -webkit-backdrop-filter: blur(12px) saturate(1.15);
+    padding: 14px;
+  }
+  .modal-card {
+    max-width: 100%;
+    border-color: rgba(206,223,255,.3);
+    background:
+      radial-gradient(150% 140% at 100% 0%, rgba(123,44,255,.22), transparent 50%),
+      radial-gradient(120% 120% at 0% 100%, rgba(125,242,168,.1), transparent 46%),
+      linear-gradient(180deg,rgba(18,22,42,.68),rgba(8,12,26,.78));
+    box-shadow:
+      0 24px 46px rgba(0,0,0,.42),
+      inset 0 1px 0 rgba(255,255,255,.2);
+  }
+  .modal-sub { color: rgba(236,242,255,.72); }
+  .modal-field label { color: rgba(223,233,255,.6); }
+  .modal-input {
+    background: rgba(255,255,255,.06);
+    border-color: rgba(203,218,255,.25);
+  }
+  .modal-addr {
+    background: rgba(132,90,255,.16);
+    border-color: rgba(154,121,255,.45);
+  }
 }
