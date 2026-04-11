@@ -882,6 +882,12 @@ export default function HolyLiquid() {
         <div className="hl-hdr">
           <div className="logo-wrap">
             <div className="ltxt">HOLYLIQUID</div>
+            <div className="tagline">
+              <span className="tag-pos">+PNL</span>
+              <span className="tag-or">or</span>
+              <span className="tag-neg">−PNL</span>
+              <span className="tag-in">in 30s</span>
+            </div>
           </div>
           {!ready ? (
             <div className="isl account-isl skeleton-account" />
