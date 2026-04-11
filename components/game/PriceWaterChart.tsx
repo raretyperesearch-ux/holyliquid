@@ -105,11 +105,15 @@ export default function PriceWaterChart({ priceHistory, pnlPos }: Props) {
     let smoothedMax = 0
     let smoothedMid = 0
     let smoothedPaddedRange = 1
+    let rawPrices: number[] = []
+    let rawMid = 0
+    let rawPaddedRange = 1
 
     function refreshSmoothedPrices(prices: number[]) {
       smoothedPrices = emaSmooth(prices, 0.18)
+      rawPrices = prices.slice()
       if (smoothedPrices.length === 0) {
-        smoothedMin = 0; smoothedMax = 0; smoothedMid = 0; smoothedPaddedRange = 1
+        smoothedMin = 0; smoothedMax = 0; smoothedMid = 0; smoothedPaddedRange = 1; rawMid = 0; rawPaddedRange = 1
         return
       }
       let mn = smoothedPrices[0], mx = smoothedPrices[0]
@@ -126,6 +130,14 @@ export default function PriceWaterChart({ priceHistory, pnlPos }: Props) {
       smoothedMax = mx
       smoothedMid = (mx + mn) / 2
       smoothedPaddedRange = padded
+      let rmn = rawPrices[0], rmx = rawPrices[0]
+      for (let i = 1; i < rawPrices.length; i++) {
+        const p = rawPrices[i]
+        if (p < rmn) rmn = p
+        if (p > rmx) rmx = p
+      }
+      rawMid = (rmx + rmn) / 2
+      rawPaddedRange = Math.max((rmx - rmn) * 1.4, Math.abs(rmx) * 0.0018, 1e-9)
     }
 
     function getBaseY(x: number, W: number, H: number): number {
@@ -155,6 +167,23 @@ export default function PriceWaterChart({ priceHistory, pnlPos }: Props) {
         + Math.sin(x * .02 + t * 1.6) * 0.55 * chop
         + Math.sin(x * .038 - t * 1.25) * 0.35 * chop
         + Math.sin(x * .08 + t * 2.2) * 0.14
+    }
+
+    function getAssetY(x: number, t: number, W: number, H: number): number {
+      if (rawPrices.length === 0) return getBaseY(x, W, H)
+      const ratio = x / Math.max(1, W - 1)
+      const idx = ratio * (rawPrices.length - 1)
+      let v = 0, wt = 0
+      for (let d = -1; d <= 1; d++) {
+        const i = Math.max(0, Math.min(rawPrices.length - 1, Math.round(idx + d)))
+        const w = d === 0 ? 1 : 0.7
+        v += rawPrices[i] * w; wt += w
+      }
+      v /= wt
+      const normalized = (v - (rawMid - rawPaddedRange / 2)) / rawPaddedRange
+      const clamped = Math.max(0, Math.min(1, normalized))
+      const rawY = H * 0.08 + (H * 0.66) - clamped * (H * 0.66)
+      return rawY - 2 + Math.sin(x * .014 + t) * 0.35
     }
 
     function drawCloud(ctx: CanvasRenderingContext2D, cx: number, cy: number, cw: number, ch: number, alpha: number, blend: number) {
@@ -220,9 +249,8 @@ export default function PriceWaterChart({ priceHistory, pnlPos }: Props) {
       const s: number[] = []
       const assetLine: number[] = []
       for (let x = 0; x < W; x++) {
-        const base = getBaseY(x, W, H)
         s.push(getY(x, chop, t, W, H))
-        assetLine.push(base - 2.5 + Math.sin(x * .013 + t * 0.9) * 0.45)
+        assetLine.push(getAssetY(x, t, W, H))
       }
       const skyH = s[0] + 8
       const rn = (n: number) => Math.round(n)
@@ -386,6 +414,32 @@ export default function PriceWaterChart({ priceHistory, pnlPos }: Props) {
       ctx2.shadowBlur = 4
       ctx2.stroke()
       ctx2.shadowBlur = 0
+
+      // Right-edge live price marker follows the main waterline.
+      const markerX = W - 6
+      const markerY = s[Math.max(0, W - 1)]
+      const livePrice = prices.length ? prices[prices.length - 1] : null
+      const livePriceTxt = livePrice !== null && Number.isFinite(livePrice)
+        ? '$' + livePrice.toLocaleString('en-US', { maximumFractionDigits: livePrice > 1000 ? 0 : 2 })
+        : '--'
+      ctx2.beginPath()
+      ctx2.arc(markerX, markerY, 2.7, 0, Math.PI * 2)
+      ctx2.fillStyle = B > .5 ? 'rgba(205,238,255,.95)' : 'rgba(188,205,255,.95)'
+      ctx2.fill()
+      const badgeW = Math.max(48, livePriceTxt.length * 6.1 + 8)
+      const badgeX = markerX - badgeW - 10
+      const badgeY = markerY - 8
+      ctx2.fillStyle = 'rgba(8,12,26,.72)'
+      ctx2.strokeStyle = B > .5 ? 'rgba(186,228,255,.45)' : 'rgba(166,178,255,.42)'
+      ctx2.lineWidth = 0.7
+      ctx2.beginPath()
+      ctx2.roundRect(badgeX, badgeY, badgeW, 14, 7)
+      ctx2.fill()
+      ctx2.stroke()
+      ctx2.fillStyle = B > .5 ? 'rgba(214,245,255,.95)' : 'rgba(209,218,255,.94)'
+      ctx2.font = '600 8.5px system-ui, sans-serif'
+      ctx2.textBaseline = 'middle'
+      ctx2.fillText(livePriceTxt, badgeX + 5, badgeY + 7)
 
       // FOAM — thin arc streaks (no circles)
       for(let x=3;x<W-3;x+=3){
