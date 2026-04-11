@@ -699,6 +699,20 @@ html, body, #__next { width: 100%; min-height: 100%; }
   border-color:rgba(255,124,152,.45);
   box-shadow:0 0 40px rgba(255,124,152,.22),inset 0 1px 0 rgba(255,255,255,.18);
 }
+.result-isl.pending {
+  background: rgba(255, 255, 255, 0.04);
+  border-color: rgba(255, 255, 255, 0.1);
+  box-shadow: none;
+}
+.result-isl.pending .result-lbl {
+  color: rgba(255, 255, 255, 0.55);
+  letter-spacing: 0.2em;
+  animation: pendingPulse 1.4s ease-in-out infinite;
+}
+@keyframes pendingPulse {
+  0%, 100% { opacity: 0.55; }
+  50%      { opacity: 1; }
+}
 .result-lbl {
   font-size:9px;font-weight:800;letter-spacing:.36em;text-transform:uppercase;
   color:rgba(255,255,255,.82);

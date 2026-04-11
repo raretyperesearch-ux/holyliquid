@@ -707,7 +707,9 @@ export default function HolyLiquid() {
   }
 
   // Profit/loss amount on a settled bet
-  const settleWon = myBet?.won === true
+  const settleWon     = myBet?.won === true
+  const settleLost    = myBet?.won === false
+  const settleResolved = settleWon || settleLost
   const settleProfit = myBet
     ? (settleWon
         ? (Number(myBet.actual_winnings ?? myBet.estimated_winnings ?? myBet.amount) - Number(myBet.amount))
@@ -987,20 +989,33 @@ export default function HolyLiquid() {
             Connect to Play
           </button>
         ) : phase === 'settled' && myBet ? (
-          // Settled round with a bet → show a dramatic result card
-          <div className={`isl result-isl ${settleWon ? 'win' : 'loss'}`}>
-            <div className="result-lbl">
-              {settleWon ? '★ You Won' : '✕ You Lost'}
+          settleResolved ? (
+            // Settled round with a known outcome → show the dramatic result card
+            <div className={`isl result-isl ${settleWon ? 'win' : 'loss'}`}>
+              <div className="result-lbl">
+                {settleWon ? '★ You Won' : '✕ You Lost'}
+              </div>
+              <div className="result-amt">
+                {settleWon ? '+' : ''}${fmt(settleProfit)}
+              </div>
+              <div className="result-meta">
+                ${fmt(myBet.amount)} on {myBet.side === 'pos' ? '+PNL' : '−PNL'}
+                {round?.result ? ` · ${round.result}` : ''}
+                {round?.round_number ? ` · Round #${round.round_number}` : ''}
+              </div>
             </div>
-            <div className="result-amt">
-              {settleWon ? '+' : ''}${fmt(settleProfit)}
+          ) : (
+            // Settled round but bet outcome not yet known → neutral pending state
+            <div className="isl result-isl pending">
+              <div className="result-lbl">SETTLING…</div>
+              <div className="result-amt" style={{ opacity: 0.6 }}>
+                ${fmt(myBet.amount)} on {myBet.side === 'pos' ? '+PNL' : '−PNL'}
+              </div>
+              <div className="result-meta">
+                {round?.round_number ? `Round #${round.round_number}` : 'Calculating result…'}
+              </div>
             </div>
-            <div className="result-meta">
-              ${fmt(myBet.amount)} on {myBet.side === 'pos' ? '+PNL' : '−PNL'}
-              {round?.result ? ` · ${round.result}` : ''}
-              {round?.round_number ? ` · Round #${round.round_number}` : ''}
-            </div>
-          </div>
+          )
         ) : myBet && phase !== 'settled' ? (
           <div className="isl" style={{ width: '100%', padding: '14px 22px', textAlign: 'center' }}>
             <div style={{ fontSize: 9, letterSpacing: '.3em', color: 'rgba(255,255,255,.3)', textTransform: 'uppercase', marginBottom: 4 }}>Your Bet</div>
