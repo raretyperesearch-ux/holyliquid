@@ -985,15 +985,15 @@ html, body, #__next { width: 100%; min-height: 100%; }
 /* ── LIVE ACTIVITY TICKER ─────────────────────────────────── */
 .live-ticker {
   position: fixed;
-  left: 8px;
-  top: 25%;
-  bottom: 25%;
-  width: 110px;
+  left: 6px;
+  top: 28%;
+  bottom: 28%;
+  width: 92px;
   pointer-events: none;
   z-index: 40;
   overflow: hidden;
-  mask-image: linear-gradient(to bottom, transparent 0%, black 12%, black 88%, transparent 100%);
-  -webkit-mask-image: linear-gradient(to bottom, transparent 0%, black 12%, black 88%, transparent 100%);
+  mask-image: linear-gradient(to bottom, transparent 0%, black 14%, black 86%, transparent 100%);
+  -webkit-mask-image: linear-gradient(to bottom, transparent 0%, black 14%, black 86%, transparent 100%);
 }
 
 .live-ticker--empty { display: none; }
@@ -1001,79 +1001,75 @@ html, body, #__next { width: 100%; min-height: 100%; }
 .live-ticker__inner {
   display: flex;
   flex-direction: column-reverse;
-  gap: 6px;
-  padding: 4px;
+  gap: 4px;
+  padding: 2px;
   height: 100%;
   overflow: hidden;
 }
 
 .tick-item {
-  background: rgba(8, 6, 18, 0.78);
-  backdrop-filter: blur(10px);
-  -webkit-backdrop-filter: blur(10px);
-  border: 1px solid rgba(255, 255, 255, 0.06);
-  border-radius: 9px;
-  padding: 8px 10px;
+  background: transparent;
+  border: none;
+  box-shadow: none;
+  border-radius: 0;
+  padding: 2px 0;
   display: flex;
   flex-wrap: wrap;
-  align-items: center;
-  gap: 4px 5px;
-  color: rgba(255, 255, 255, 0.92);
-  animation: tickIn 0.45s cubic-bezier(.34, 1.56, .64, 1);
+  align-items: baseline;
+  gap: 3px 4px;
+  color: rgba(255, 255, 255, 0.85);
+  text-shadow: 0 1px 4px rgba(0, 0, 0, 0.85), 0 0 12px rgba(0, 0, 0, 0.6);
+  animation: tickIn 0.4s cubic-bezier(.34, 1.56, .64, 1);
   flex-shrink: 0;
-  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.3);
 }
-
-.tick-item--bet  { border-left: 2px solid rgba(123, 44, 255, .8); }
-.tick-item--win  { border-left: 2px solid rgba(125, 242, 168, .9); }
-.tick-item--loss { border-left: 2px solid rgba(255, 124, 152, .8); }
 
 .tick-verb {
-  font-size: 8.5px;
+  font-size: 7px;
   font-weight: 800;
   letter-spacing: 0.08em;
-  color: rgba(255, 255, 255, 0.55);
+  color: rgba(255, 255, 255, 0.5);
+  text-transform: uppercase;
 }
-.tick-verb--win  { color: rgba(125, 242, 168, .85); }
-.tick-verb--loss { color: rgba(255, 124, 152, .85); }
+.tick-verb--win  { color: rgba(125, 242, 168, .8); }
+.tick-verb--loss { color: rgba(255, 124, 152, .8); }
 
 .tick-amount {
-  font-size: 13px;
-  font-weight: 900;
+  font-size: 10px;
+  font-weight: 800;
   font-feature-settings: "tnum";
   letter-spacing: -0.01em;
+  color: rgba(255, 255, 255, 0.95);
 }
 .tick-amount--win  { color: #7df2a8; }
 .tick-amount--loss { color: #ff7c98; }
 
 .tick-side {
-  font-size: 8.5px;
+  font-size: 7px;
   font-weight: 800;
-  padding: 2px 5px;
-  border-radius: 4px;
+  padding: 0;
+  background: transparent;
   letter-spacing: .05em;
 }
-.tick-side--pos { background: rgba(125, 242, 168, .15); color: #7df2a8; }
-.tick-side--neg { background: rgba(255, 124, 152, .15); color: #ff7c98; }
+.tick-side--pos { color: #7df2a8; }
+.tick-side--neg { color: #ff7c98; }
 
 @keyframes tickIn {
-  0%   { opacity: 0; transform: translateX(-24px) scale(0.9); }
-  60%  { opacity: 1; transform: translateX(2px) scale(1.02); }
-  100% { opacity: 1; transform: translateX(0) scale(1); }
+  0%   { opacity: 0; transform: translateX(-12px); }
+  100% { opacity: 1; transform: translateX(0); }
 }
 
-/* Desktop: side rail in negative space outside the 430px column */
+/* Desktop: same minimal style, slightly larger */
 @media (min-width: 1024px) {
   .live-ticker {
-    left: calc(50% - 395px);
-    width: 180px;
-    top: 12%;
-    bottom: 12%;
+    left: calc(50% - 360px);
+    width: 140px;
+    top: 14%;
+    bottom: 14%;
   }
-  .tick-item { padding: 12px 14px; gap: 5px 7px; }
-  .tick-verb { font-size: 10px; }
-  .tick-amount { font-size: 16px; }
-  .tick-side { font-size: 10px; padding: 3px 7px; }
+  .tick-item { padding: 3px 0; gap: 4px 5px; }
+  .tick-verb { font-size: 8.5px; }
+  .tick-amount { font-size: 12px; }
+  .tick-side { font-size: 8.5px; }
 }
 
 @media (prefers-reduced-motion: reduce) {
