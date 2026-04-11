@@ -172,8 +172,17 @@ html, body, #__next { width: 100%; height: 100%; }
 .ti-row { display:flex;flex-direction:column;align-items:flex-start;gap:7px;margin-bottom:8px }
 .phase-lbl { font-size:6px;letter-spacing:.12em;font-weight:700;text-transform:uppercase;line-height:1.3;word-break:break-word }
 .timer-num { font-size:clamp(13px,3.8vw,18px);font-weight:800;font-variant-numeric:tabular-nums;color:rgba(255,255,255,.9);letter-spacing:.05em;white-space:nowrap }
-.prog-tr { height:4px;background:rgba(255,255,255,.07);border-radius:99px;overflow:hidden;box-shadow:inset 0 1px 6px rgba(0,0,0,.3) }
+.prog-tr { position:relative;height:4px;background:rgba(255,255,255,.07);border-radius:99px;overflow:hidden;box-shadow:inset 0 1px 6px rgba(0,0,0,.3) }
 .prog-f { height:100%;border-radius:99px;background:linear-gradient(90deg,#1A1AFF,#7B2CFF,#9A7BFF);box-shadow:0 0 18px rgba(123,44,255,.4);transition:width 1s ease-in-out }
+.prog-lock-marker {
+  position:absolute;
+  top:-2px;
+  width:1px;
+  height:8px;
+  background:rgba(255,255,255,.42);
+  box-shadow:0 0 6px rgba(255,255,255,.34);
+  pointer-events:none;
+}
 
 /* BOAT ZONE */
 .boat-zone { flex:1;min-height:60px }

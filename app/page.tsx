@@ -453,17 +453,7 @@ export default function HolyLiquid() {
     : round.status === 'void' ? 'void'
     : 'loading'
 
-  // Real round duration derived from backend timestamps — no more hardcoded
-  // 10000/20000 magic numbers. open_price_ts is when the round opened.
-  // Defensive: if any timestamp is missing/invalid, fall back to 1 so the
-  // progress ratio stays finite (width: 0%) instead of NaN.
-  const totalBettingMs = (() => {
-    if (!round) return 1
-    const closes = new Date(round.betting_closes_at).getTime()
-    const opens  = new Date(round.open_price_ts).getTime()
-    if (!Number.isFinite(closes) || !Number.isFinite(opens) || closes <= opens) return 1
-    return closes - opens
-  })()
+  // Timing spans derived from backend timestamps (defensive fallback keeps ratios finite).
   const totalWatchingMs = (() => {
     if (!round) return 1
     const closes = new Date(round.closes_at).getTime()
@@ -472,28 +462,28 @@ export default function HolyLiquid() {
     return closes - lock
   })()
 
-  const timerSec = phase === 'betting'
-    ? Math.ceil(countdown.lock / 1000)
-    : Math.ceil(countdown.close / 1000)
+  const timerSec = Math.ceil(Math.max(0, countdown.close) / 1000)
 
-  // Final 10 seconds of betting → pulse + "LOCKING SOON"
+  // Final 10 seconds of betting → pulse + "LAST CALL"
   const isFinalCountdown = phase === 'betting' && countdown.lock > 0 && countdown.lock <= 10_000
 
-  const timerDisplay = phase === 'settled' ? (round?.result ?? '--')
-    : phase === 'void' ? 'VOID'
-    : `0:${String(Math.max(0, timerSec)).padStart(2, '0')}`
+  const timerDisplay = `0:${String(Math.max(0, timerSec)).padStart(2, '0')}`
 
-  const progressPct = phase === 'betting'
-    ? (countdown.lock / totalBettingMs) * 100
-    : phase === 'watching'
-    ? (countdown.close / totalWatchingMs) * 100
-    : 0
+  const totalRoundMs = (() => {
+    if (!round) return 1
+    const opens = new Date(round.open_price_ts).getTime()
+    const closes = new Date(round.closes_at).getTime()
+    if (!Number.isFinite(opens) || !Number.isFinite(closes) || closes <= opens) return 1
+    return closes - opens
+  })()
+  const progressPct = (Math.max(0, countdown.close) / totalRoundMs) * 100
+  const lockMarkerPct = (totalWatchingMs / totalRoundMs) * 100
 
   const phaseLabel = phase === 'betting'
-    ? (isFinalCountdown ? '● LOCKING SOON' : '● BETTING OPEN')
-    : phase === 'watching' ? '● WAIT FOR NEXT ROUND'
-    : phase === 'settled' ? `● ${round?.result ?? 'SETTLED'}`
-    : phase === 'void' ? '● VOID'
+    ? (isFinalCountdown ? '● LAST CALL' : '● GET IN NOW')
+    : phase === 'watching' ? '● MONEY IN MOTION'
+    : phase === 'settled' ? '● RUN IT BACK'
+    : phase === 'void' ? '● ROUND VOID'
     : '● LOADING'
 
   const phaseColor = phase === 'betting'
@@ -743,6 +733,7 @@ export default function HolyLiquid() {
             </div>
             <div className="prog-tr">
               <div className="prog-f" style={{ width: `${Math.max(0, Math.min(100, progressPct))}%`, background: progColor }} />
+              <div className="prog-lock-marker" style={{ left: `${Math.max(0, Math.min(100, lockMarkerPct))}%` }} />
             </div>
           </div>
         </div>
