@@ -1879,3 +1879,20 @@ html, body, #__next { width: 100%; min-height: 100%; }
   .discord-fab { animation: none; transition: none; }
 }
 
+/* ── MODAL TEMP NAME DISPLAY ─────────────────────────────── */
+.modal-tempname {
+  font-size: 11px;
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.45);
+  letter-spacing: 0.04em;
+  text-align: center;
+  margin: 6px 0 12px;
+  font-family: -apple-system, 'SF Pro Display', system-ui, sans-serif;
+}
+.modal-tempname strong {
+  color: rgba(255, 255, 255, 0.85);
+  font-weight: 800;
+  font-feature-settings: "tnum";
+  letter-spacing: 0.02em;
+}
+
