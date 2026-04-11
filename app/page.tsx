@@ -16,11 +16,22 @@ function fmt(n: number) {
 
 function heroFontSize(valueText: string): string {
   const digits = valueText.replace(/[^0-9]/g, '').length
-  if (digits >= 11) return '34px'
-  if (digits >= 10) return '38px'
-  if (digits >= 9) return '42px'
-  if (digits >= 8) return '46px'
+  if (digits >= 14) return '24px'
+  if (digits >= 13) return '26px'
+  if (digits >= 12) return '29px'
+  if (digits >= 11) return '32px'
+  if (digits >= 10) return '36px'
+  if (digits >= 9) return '40px'
+  if (digits >= 8) return '45px'
   return '52px'
+}
+
+function pnlFontSize(valueText: string): string {
+  const digits = valueText.replace(/[^0-9]/g, '').length
+  if (digits >= 10) return '11px'
+  if (digits >= 9) return '12px'
+  if (digits >= 8) return '13px'
+  return '15px'
 }
 
 type ModalKind = null | 'deposit' | 'withdraw'
@@ -482,6 +493,8 @@ export default function HolyLiquid() {
     : 'live'
   const heroValue = `$${round ? Math.round(round.current_value).toLocaleString() : '---'}`
   const heroSize = heroFontSize(heroValue)
+  const pnlText = `${pnlPos ? '+' : ''}$${Math.abs(round?.pnl_usd ?? 0).toFixed(2)}`
+  const pnlSize = pnlFontSize(pnlText)
 
   return (
     <div className="hl-root">
@@ -554,9 +567,9 @@ export default function HolyLiquid() {
             <span className="pnl-mini">PnL</span>
             <span
               className="pnl-chg"
-              style={{ color: pnlPos ? '#7df2a8' : '#ff7c98', fontSize: Math.abs(round?.pnl_usd ?? 0) >= 10000 ? '13px' : undefined }}
+              style={{ color: pnlPos ? '#7df2a8' : '#ff7c98', fontSize: pnlSize }}
             >
-              {pnlPos ? '+' : ''}${Math.abs(round?.pnl_usd ?? 0).toFixed(2)}
+              {pnlText}
             </span>
             <span className="pnl-pct">
               {pnlPos ? '+' : ''}{(round?.pnl_pct ?? 0).toFixed(2)}%
