@@ -105,11 +105,15 @@ export default function PriceWaterChart({ priceHistory, pnlPos }: Props) {
     let smoothedMax = 0
     let smoothedMid = 0
     let smoothedPaddedRange = 1
+    let rawPrices: number[] = []
+    let rawMid = 0
+    let rawPaddedRange = 1
 
     function refreshSmoothedPrices(prices: number[]) {
       smoothedPrices = emaSmooth(prices, 0.18)
+      rawPrices = prices.slice()
       if (smoothedPrices.length === 0) {
-        smoothedMin = 0; smoothedMax = 0; smoothedMid = 0; smoothedPaddedRange = 1
+        smoothedMin = 0; smoothedMax = 0; smoothedMid = 0; smoothedPaddedRange = 1; rawMid = 0; rawPaddedRange = 1
         return
       }
       let mn = smoothedPrices[0], mx = smoothedPrices[0]
@@ -126,21 +130,37 @@ export default function PriceWaterChart({ priceHistory, pnlPos }: Props) {
       smoothedMax = mx
       smoothedMid = (mx + mn) / 2
       smoothedPaddedRange = padded
+      let rmn = rawPrices[0], rmx = rawPrices[0]
+      for (let i = 1; i < rawPrices.length; i++) {
+        const p = rawPrices[i]
+        if (p < rmn) rmn = p
+        if (p > rmx) rmx = p
+      }
+      rawMid = (rmx + rmn) / 2
+      rawPaddedRange = Math.max((rmx - rmn) * 1.4, Math.abs(rmx) * 0.0018, 1e-9)
     }
 
     function getBaseY(x: number, W: number, H: number): number {
       if (smoothedPrices.length === 0) return H * 0.5
       const ratio = x / Math.max(1, W - 1)
       const idx = ratio * (smoothedPrices.length - 1)
-      // 5-point weighted average across the spatial axis for extra smoothness
-      // on top of the temporal EMA. Catches inter-sample aliasing.
-      let v = 0, wt = 0
-      for (let d = -2; d <= 2; d++) {
-        const i = Math.max(0, Math.min(smoothedPrices.length - 1, Math.round(idx + d)))
-        const w = 1 / (Math.abs(d) + 1)
-        v += smoothedPrices[i] * w; wt += w
-      }
-      v /= wt
+      const i1 = Math.max(0, Math.min(smoothedPrices.length - 1, Math.floor(idx)))
+      const i2 = Math.max(0, Math.min(smoothedPrices.length - 1, i1 + 1))
+      const i0 = Math.max(0, Math.min(smoothedPrices.length - 1, i1 - 1))
+      const i3 = Math.max(0, Math.min(smoothedPrices.length - 1, i2 + 1))
+      const t = idx - i1
+      const p0 = smoothedPrices[i0]
+      const p1 = smoothedPrices[i1]
+      const p2 = smoothedPrices[i2]
+      const p3 = smoothedPrices[i3]
+      const t2 = t * t
+      const t3 = t2 * t
+      const v = 0.5 * (
+        (2 * p1) +
+        (-p0 + p2) * t +
+        (2 * p0 - 5 * p1 + 4 * p2 - p3) * t2 +
+        (-p0 + 3 * p1 - 3 * p2 + p3) * t3
+      )
       // Normalize against the padded range centered on mid — calmer, premium feel.
       const normalized = (v - (smoothedMid - smoothedPaddedRange / 2)) / smoothedPaddedRange
       // Clamp defensively so a noisy single sample can't shoot off-screen.
@@ -150,15 +170,38 @@ export default function PriceWaterChart({ priceHistory, pnlPos }: Props) {
 
     function getY(x: number, chop: number, t: number, W: number, H: number): number {
       const b = getBaseY(x, W, H)
-      // Procedural chop dialed back ~45% vs the original. The water should
-      // whisper on top of the real price curve, not karate-kick over it.
+      // Main waterline should be the chart path first; motion is subtle physics.
       return b
-        + Math.sin(x * .016 + t * 1.9) * 1.6 * chop
-        + Math.sin(x * .028 - t * 1.4) * 0.95 * chop
-        + Math.sin(x * .055 + t * 2.8) * 0.5
-        + Math.sin(x * .09  - t * 3.5) * 0.28 * chop
-        + Math.sin(x * .15  + t * 5)   * 0.14
-        + Math.sin(x * .24  - t * 6.5) * 0.08 * chop
+        + Math.sin(x * .02 + t * 1.6) * 0.55 * chop
+        + Math.sin(x * .038 - t * 1.25) * 0.35 * chop
+        + Math.sin(x * .08 + t * 2.2) * 0.14
+    }
+
+    function getAssetY(x: number, t: number, W: number, H: number): number {
+      if (rawPrices.length === 0) return getBaseY(x, W, H)
+      const ratio = x / Math.max(1, W - 1)
+      const idx = ratio * (rawPrices.length - 1)
+      const i1 = Math.max(0, Math.min(rawPrices.length - 1, Math.floor(idx)))
+      const i2 = Math.max(0, Math.min(rawPrices.length - 1, i1 + 1))
+      const i0 = Math.max(0, Math.min(rawPrices.length - 1, i1 - 1))
+      const i3 = Math.max(0, Math.min(rawPrices.length - 1, i2 + 1))
+      const u = idx - i1
+      const u2 = u * u
+      const u3 = u2 * u
+      const p0 = rawPrices[i0]
+      const p1 = rawPrices[i1]
+      const p2 = rawPrices[i2]
+      const p3 = rawPrices[i3]
+      const v = 0.5 * (
+        (2 * p1) +
+        (-p0 + p2) * u +
+        (2 * p0 - 5 * p1 + 4 * p2 - p3) * u2 +
+        (-p0 + 3 * p1 - 3 * p2 + p3) * u3
+      )
+      const normalized = (v - (rawMid - rawPaddedRange / 2)) / rawPaddedRange
+      const clamped = Math.max(0, Math.min(1, normalized))
+      const rawY = H * 0.08 + (H * 0.66) - clamped * (H * 0.66)
+      return rawY - 2 + Math.sin(x * .014 + t) * 0.35
     }
 
     function drawCloud(ctx: CanvasRenderingContext2D, cx: number, cy: number, cw: number, ch: number, alpha: number, blend: number) {
@@ -192,7 +235,7 @@ export default function PriceWaterChart({ priceHistory, pnlPos }: Props) {
       const targetBlend = st.pnlPos ? 1 : 0
       st.pnlBlend = lerp(st.pnlBlend, targetBlend, .025)
       const B = st.pnlBlend
-      const chop = lerp(1.85, 1, B)
+      const chop = lerp(1, 0.78, B)
 
       const { width: W, height: H, dpr } = sizeRef.current
       if (!W || !H) return  // not sized yet
@@ -222,7 +265,11 @@ export default function PriceWaterChart({ priceHistory, pnlPos }: Props) {
       refreshSmoothedPrices(prices)
 
       const s: number[] = []
-      for (let x = 0; x < W; x++) s.push(getY(x, chop, t, W, H))
+      const assetLine: number[] = []
+      for (let x = 0; x < W; x++) {
+        s.push(getY(x, chop, t, W, H))
+        assetLine.push(getAssetY(x, t, W, H))
+      }
       const skyH = s[0] + 8
       const rn = (n: number) => Math.round(n)
 
@@ -374,6 +421,43 @@ export default function PriceWaterChart({ priceHistory, pnlPos }: Props) {
         shimG.addColorStop(i/18,B>.5?`rgba(200,235,255,${sh})`:`rgba(130,155,210,${sh})`)
       }
       ctx2.fillStyle=shimG; ctx2.fill()
+
+      // Faint secondary asset line above/within the main waterline.
+      ctx2.beginPath()
+      ctx2.moveTo(0, assetLine[0])
+      for (let x = 1; x < W; x++) ctx2.lineTo(x, assetLine[x])
+      ctx2.strokeStyle = B > .5 ? 'rgba(198,240,255,.28)' : 'rgba(165,190,235,.32)'
+      ctx2.lineWidth = 1.25
+      ctx2.shadowColor = B > .5 ? 'rgba(155,220,255,.25)' : 'rgba(150,180,255,.22)'
+      ctx2.shadowBlur = 4
+      ctx2.stroke()
+      ctx2.shadowBlur = 0
+
+      // Right-edge live price marker follows the main waterline.
+      const markerX = W - 6
+      const markerY = s[Math.max(0, W - 1)]
+      const livePrice = prices.length ? prices[prices.length - 1] : null
+      const livePriceTxt = livePrice !== null && Number.isFinite(livePrice)
+        ? '$' + livePrice.toLocaleString('en-US', { maximumFractionDigits: livePrice > 1000 ? 0 : 2 })
+        : '--'
+      ctx2.beginPath()
+      ctx2.arc(markerX, markerY, 2.7, 0, Math.PI * 2)
+      ctx2.fillStyle = B > .5 ? 'rgba(205,238,255,.95)' : 'rgba(188,205,255,.95)'
+      ctx2.fill()
+      const badgeW = Math.max(48, livePriceTxt.length * 6.1 + 8)
+      const badgeX = markerX - badgeW - 10
+      const badgeY = markerY - 8
+      ctx2.fillStyle = 'rgba(8,12,26,.72)'
+      ctx2.strokeStyle = B > .5 ? 'rgba(186,228,255,.45)' : 'rgba(166,178,255,.42)'
+      ctx2.lineWidth = 0.7
+      ctx2.beginPath()
+      ctx2.roundRect(badgeX, badgeY, badgeW, 14, 7)
+      ctx2.fill()
+      ctx2.stroke()
+      ctx2.fillStyle = B > .5 ? 'rgba(214,245,255,.95)' : 'rgba(209,218,255,.94)'
+      ctx2.font = '600 8.5px system-ui, sans-serif'
+      ctx2.textBaseline = 'middle'
+      ctx2.fillText(livePriceTxt, badgeX + 5, badgeY + 7)
 
       // FOAM — thin arc streaks (no circles)
       for(let x=3;x<W-3;x+=3){
