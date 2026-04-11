@@ -144,15 +144,23 @@ export default function PriceWaterChart({ priceHistory, pnlPos }: Props) {
       if (smoothedPrices.length === 0) return H * 0.5
       const ratio = x / Math.max(1, W - 1)
       const idx = ratio * (smoothedPrices.length - 1)
-      // 5-point weighted average across the spatial axis for extra smoothness
-      // on top of the temporal EMA. Catches inter-sample aliasing.
-      let v = 0, wt = 0
-      for (let d = -2; d <= 2; d++) {
-        const i = Math.max(0, Math.min(smoothedPrices.length - 1, Math.round(idx + d)))
-        const w = 1 / (Math.abs(d) + 1)
-        v += smoothedPrices[i] * w; wt += w
-      }
-      v /= wt
+      const i1 = Math.max(0, Math.min(smoothedPrices.length - 1, Math.floor(idx)))
+      const i2 = Math.max(0, Math.min(smoothedPrices.length - 1, i1 + 1))
+      const i0 = Math.max(0, Math.min(smoothedPrices.length - 1, i1 - 1))
+      const i3 = Math.max(0, Math.min(smoothedPrices.length - 1, i2 + 1))
+      const t = idx - i1
+      const p0 = smoothedPrices[i0]
+      const p1 = smoothedPrices[i1]
+      const p2 = smoothedPrices[i2]
+      const p3 = smoothedPrices[i3]
+      const t2 = t * t
+      const t3 = t2 * t
+      const v = 0.5 * (
+        (2 * p1) +
+        (-p0 + p2) * t +
+        (2 * p0 - 5 * p1 + 4 * p2 - p3) * t2 +
+        (-p0 + 3 * p1 - 3 * p2 + p3) * t3
+      )
       // Normalize against the padded range centered on mid — calmer, premium feel.
       const normalized = (v - (smoothedMid - smoothedPaddedRange / 2)) / smoothedPaddedRange
       // Clamp defensively so a noisy single sample can't shoot off-screen.
@@ -173,13 +181,23 @@ export default function PriceWaterChart({ priceHistory, pnlPos }: Props) {
       if (rawPrices.length === 0) return getBaseY(x, W, H)
       const ratio = x / Math.max(1, W - 1)
       const idx = ratio * (rawPrices.length - 1)
-      let v = 0, wt = 0
-      for (let d = -1; d <= 1; d++) {
-        const i = Math.max(0, Math.min(rawPrices.length - 1, Math.round(idx + d)))
-        const w = d === 0 ? 1 : 0.7
-        v += rawPrices[i] * w; wt += w
-      }
-      v /= wt
+      const i1 = Math.max(0, Math.min(rawPrices.length - 1, Math.floor(idx)))
+      const i2 = Math.max(0, Math.min(rawPrices.length - 1, i1 + 1))
+      const i0 = Math.max(0, Math.min(rawPrices.length - 1, i1 - 1))
+      const i3 = Math.max(0, Math.min(rawPrices.length - 1, i2 + 1))
+      const u = idx - i1
+      const u2 = u * u
+      const u3 = u2 * u
+      const p0 = rawPrices[i0]
+      const p1 = rawPrices[i1]
+      const p2 = rawPrices[i2]
+      const p3 = rawPrices[i3]
+      const v = 0.5 * (
+        (2 * p1) +
+        (-p0 + p2) * u +
+        (2 * p0 - 5 * p1 + 4 * p2 - p3) * u2 +
+        (-p0 + 3 * p1 - 3 * p2 + p3) * u3
+      )
       const normalized = (v - (rawMid - rawPaddedRange / 2)) / rawPaddedRange
       const clamped = Math.max(0, Math.min(1, normalized))
       const rawY = H * 0.08 + (H * 0.66) - clamped * (H * 0.66)
