@@ -150,15 +150,11 @@ export default function PriceWaterChart({ priceHistory, pnlPos }: Props) {
 
     function getY(x: number, chop: number, t: number, W: number, H: number): number {
       const b = getBaseY(x, W, H)
-      // Procedural chop dialed back ~45% vs the original. The water should
-      // whisper on top of the real price curve, not karate-kick over it.
+      // Main waterline should be the chart path first; motion is subtle physics.
       return b
-        + Math.sin(x * .016 + t * 1.9) * 1.6 * chop
-        + Math.sin(x * .028 - t * 1.4) * 0.95 * chop
-        + Math.sin(x * .055 + t * 2.8) * 0.5
-        + Math.sin(x * .09  - t * 3.5) * 0.28 * chop
-        + Math.sin(x * .15  + t * 5)   * 0.14
-        + Math.sin(x * .24  - t * 6.5) * 0.08 * chop
+        + Math.sin(x * .02 + t * 1.6) * 0.55 * chop
+        + Math.sin(x * .038 - t * 1.25) * 0.35 * chop
+        + Math.sin(x * .08 + t * 2.2) * 0.14
     }
 
     function drawCloud(ctx: CanvasRenderingContext2D, cx: number, cy: number, cw: number, ch: number, alpha: number, blend: number) {
@@ -192,7 +188,7 @@ export default function PriceWaterChart({ priceHistory, pnlPos }: Props) {
       const targetBlend = st.pnlPos ? 1 : 0
       st.pnlBlend = lerp(st.pnlBlend, targetBlend, .025)
       const B = st.pnlBlend
-      const chop = lerp(1.85, 1, B)
+      const chop = lerp(1, 0.78, B)
 
       const { width: W, height: H, dpr } = sizeRef.current
       if (!W || !H) return  // not sized yet
@@ -222,7 +218,12 @@ export default function PriceWaterChart({ priceHistory, pnlPos }: Props) {
       refreshSmoothedPrices(prices)
 
       const s: number[] = []
-      for (let x = 0; x < W; x++) s.push(getY(x, chop, t, W, H))
+      const assetLine: number[] = []
+      for (let x = 0; x < W; x++) {
+        const base = getBaseY(x, W, H)
+        s.push(getY(x, chop, t, W, H))
+        assetLine.push(base - 2.5 + Math.sin(x * .013 + t * 0.9) * 0.45)
+      }
       const skyH = s[0] + 8
       const rn = (n: number) => Math.round(n)
 
@@ -374,6 +375,17 @@ export default function PriceWaterChart({ priceHistory, pnlPos }: Props) {
         shimG.addColorStop(i/18,B>.5?`rgba(200,235,255,${sh})`:`rgba(130,155,210,${sh})`)
       }
       ctx2.fillStyle=shimG; ctx2.fill()
+
+      // Faint secondary asset line above/within the main waterline.
+      ctx2.beginPath()
+      ctx2.moveTo(0, assetLine[0])
+      for (let x = 1; x < W; x++) ctx2.lineTo(x, assetLine[x])
+      ctx2.strokeStyle = B > .5 ? 'rgba(198,240,255,.28)' : 'rgba(165,190,235,.32)'
+      ctx2.lineWidth = 1.25
+      ctx2.shadowColor = B > .5 ? 'rgba(155,220,255,.25)' : 'rgba(150,180,255,.22)'
+      ctx2.shadowBlur = 4
+      ctx2.stroke()
+      ctx2.shadowBlur = 0
 
       // FOAM — thin arc streaks (no circles)
       for(let x=3;x<W-3;x+=3){
