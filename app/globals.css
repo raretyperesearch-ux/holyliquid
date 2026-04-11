@@ -349,14 +349,14 @@ html, body, #__next { width: 100%; min-height: 100%; }
   display:flex;align-items:center;gap:0;
   padding:5px;
   border-radius:15px;
+  flex-shrink:0;
+  min-width:0;
 }
 .account-center {
-  justify-self:center;
-  width:100%;
-  max-width:214px;
+  width:auto;
+  max-width:none;
 }
 .skeleton-account {
-  justify-self:center;
   width:100%;
   max-width:214px;
   min-height:42px;
@@ -370,6 +370,7 @@ html, body, #__next { width: 100%; min-height: 100%; }
   padding:7px 9px;border-radius:11px;
   cursor:pointer;
   transition:background .15s,color .15s,border-color .15s,transform .12s;
+  white-space:nowrap;
 }
 .acct-btn:hover { background:rgba(255,255,255,.08);color:#fff;border-color:rgba(123,44,255,.45) }
 .acct-btn:active { transform:translateY(1px) }
@@ -647,9 +648,15 @@ html, body, #__next { width: 100%; min-height: 100%; }
   .split-meta, .settled-tag, .streak-tag, .history-pattern, .history-proof { font-size:8px; }
   .rh-main { font-size:12px; }
   .rh-chip { font-size:9px; }
-  .hl-hdr { grid-template-columns:1fr auto; }
-  .logo-wrap { grid-column:1; }
-  .account-center, .connect-pill, .skeleton-account { grid-column:1 / -1; order:2; }
+  /* On narrow phones, shrink the account island so Deposit/Available/Cash Out fit beside the logo */
+  .hl-hdr { gap: 4px; }
+  .hl-hdr .logo-wrap .ltxt { font-size: 18px; }
+  .hl-hdr .tagline { font-size: 7px; gap: 3px; }
+  .account-isl { padding: 3px; }
+  .acct-btn { padding: 6px 7px; font-size: 7.5px; letter-spacing: .12em; }
+  .acct-bal { padding: 0 7px; min-width: 62px; margin: 0 2px; }
+  .acct-bal .bl { font-size: 6.5px; letter-spacing: .22em; }
+  .acct-bal .bv { font-size: 11px; }
 }
 
 @media (min-width: 768px) {
