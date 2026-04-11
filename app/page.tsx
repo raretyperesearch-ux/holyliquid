@@ -6,6 +6,7 @@ import { createPortal } from 'react-dom'
 import { usePrivy } from '@privy-io/react-auth'
 import { useRound, type LastResult } from '@/hooks/useRound'
 import { LiveTicker } from './components/LiveTicker'
+import { DiscordButton } from './components/DiscordButton'
 import { SoundToggle } from './components/SoundToggle'
 import { sounds } from '../lib/sounds'
 import { encodeFunctionData, parseUnits } from 'viem'
@@ -831,6 +832,7 @@ export default function HolyLiquid() {
   return (
     <div className="hl-root">
       <LiveTicker />
+      <DiscordButton />
 
       {/* ── SCENE — contains chart + UI in an isolated stacking context ── */}
       <div
