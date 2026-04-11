@@ -6,17 +6,28 @@ import { sounds } from '../../lib/sounds'
 export function SoundToggle() {
   const [muted, setMuted] = useState(false)
 
+  // Hydrate from persisted preference. NOTE: we intentionally do NOT call
+  // sounds.init() here — useEffect runs outside any user gesture, which on
+  // Safari produces a permanently-suspended AudioContext. The module-level
+  // unlock listener in lib/sounds.ts handles first-gesture init instead.
   useEffect(() => {
-    sounds.init()
     setMuted(sounds.isMuted())
   }, [])
 
   const toggle = () => {
+    // Ensure the AudioContext is primed inside this click handler. If the
+    // user's very first page interaction is the sound toggle itself, this
+    // is the only synchronous gesture that can legally create the context
+    // on Safari. Must be called before any async work.
+    sounds.init()
+
     const newMuted = sounds.toggleMuted()
     setMuted(newMuted)
-    // Play a click confirmation if we just unmuted
+
+    // Fire confirmation click SYNCHRONOUSLY (no setTimeout) — Safari only
+    // honors audio calls that happen in the same tick as the user gesture.
     if (!newMuted) {
-      setTimeout(() => sounds.click(), 0)
+      sounds.click()
     }
   }
 

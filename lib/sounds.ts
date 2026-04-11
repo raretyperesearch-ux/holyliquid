@@ -1,17 +1,46 @@
 // lib/sounds.ts
 // Programmatic Web Audio API sound engine. No asset files needed.
 // All sounds are synthesized at runtime from oscillators + noise + gain envelopes.
+//
+// Safari unlock notes (important — do not "simplify" without testing on iOS):
+// 1. The `muted` preference is loaded at MODULE LOAD, not inside init(), so
+//    `isMuted()` returns the correct value from the very first call (before
+//    the AudioContext even exists).
+// 2. `new AudioContext()` must be created SYNCHRONOUSLY inside a user gesture
+//    on Safari or the context is born permanently suspended. We install a
+//    one-time global unlock listener at the bottom of this file that catches
+//    the first `pointerdown`/`touchend`/`keydown`/`click` anywhere on the page
+//    and primes the context from inside that gesture.
+// 3. iOS Safari needs a "silent buffer kick": playing a 1-sample silent
+//    AudioBufferSource inside the gesture to actually wake the context.
+//    `ctx.resume()` alone resolves successfully but leaves the context silent
+//    on some iOS versions.
+// 4. Public sound methods (`click`, `bet`, `win`, ...) must be called
+//    synchronously from inside click/touch handlers. Never wrap them in
+//    setTimeout/setImmediate/Promise.resolve().then — that breaks Safari's
+//    user-gesture chain and audio is dropped.
+
+function loadMutedPref(): boolean {
+  if (typeof window === 'undefined') return false
+  try {
+    return window.localStorage.getItem('hl_muted') === 'true'
+  } catch {
+    return false
+  }
+}
 
 class SoundEngine {
   private ctx: AudioContext | null = null
   private masterGain: GainNode | null = null
-  private muted: boolean = false
+  // Load muted preference synchronously at construction (module load).
+  // This guarantees `isMuted()` is correct before any init() has run.
+  private muted: boolean = loadMutedPref()
   private initialized: boolean = false
 
   init() {
     if (this.initialized || typeof window === 'undefined') return
     try {
-      const Ctx = window.AudioContext || (window as any).webkitAudioContext
+      const Ctx = window.AudioContext || (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext
       if (!Ctx) return
       this.ctx = new Ctx()
       this.masterGain = this.ctx.createGain()
@@ -19,18 +48,34 @@ class SoundEngine {
       this.masterGain.connect(this.ctx.destination)
       this.initialized = true
 
-      // Restore muted preference
+      // Safari unlock kick: play a 1-sample silent buffer inside the gesture
+      // that triggered init(). This is the only reliable way to actually wake
+      // the AudioContext on iOS — `ctx.resume()` alone isn't enough.
       try {
-        const stored = localStorage.getItem('hl_muted')
-        if (stored === 'true') this.muted = true
+        const buffer = this.ctx.createBuffer(1, 1, 22050)
+        const src = this.ctx.createBufferSource()
+        src.buffer = buffer
+        src.connect(this.ctx.destination)
+        src.start(0)
       } catch {}
 
-      // Resume context if it was suspended (Chrome autoplay policy)
+      // Resume context if it was suspended (Chrome autoplay policy + Safari)
       if (this.ctx.state === 'suspended') {
         this.ctx.resume().catch(() => {})
       }
     } catch (e) {
       console.warn('[Sounds] Init failed:', e)
+    }
+  }
+
+  /**
+   * Called from the global one-time unlock listener on the first user gesture.
+   * Also safe to call from any public sound method.
+   */
+  unlock() {
+    if (!this.initialized) this.init()
+    if (this.ctx && this.ctx.state === 'suspended') {
+      this.ctx.resume().catch(() => {})
     }
   }
 
@@ -48,7 +93,7 @@ class SoundEngine {
 
   setMuted(m: boolean) {
     this.muted = m
-    try { localStorage.setItem('hl_muted', String(m)) } catch {}
+    try { window.localStorage.setItem('hl_muted', String(m)) } catch {}
   }
 
   toggleMuted(): boolean {
@@ -194,3 +239,26 @@ class SoundEngine {
 }
 
 export const sounds = new SoundEngine()
+
+// ── Global one-time unlock listener ───────────────────────────
+// Safari requires `new AudioContext()` to be created synchronously inside a
+// user gesture. Listen for the very first interaction anywhere on the page
+// and prime the context from inside that gesture. Uses capture-phase and
+// removes itself after firing once.
+if (typeof window !== 'undefined') {
+  const unlockEvents: Array<keyof WindowEventMap> = [
+    'pointerdown',
+    'touchend',
+    'keydown',
+    'click',
+  ]
+  const unlock = () => {
+    sounds.unlock()
+    unlockEvents.forEach((ev) => {
+      window.removeEventListener(ev, unlock, true)
+    })
+  }
+  unlockEvents.forEach((ev) => {
+    window.addEventListener(ev, unlock, true)
+  })
+}
