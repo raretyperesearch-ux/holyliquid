@@ -10,6 +10,7 @@ const PriceWaterChart = dynamic(() => import('@/components/game/PriceWaterChart'
 
 const CHIPS = [5, 10, 25, 50, 100]
 const MVP_ASSET_LABEL = 'ETH'
+const WELCOME_SEEN_KEY = 'hl:welcomeSeen:v1'
 
 function fmt(n: number) {
   return n.toLocaleString('en-US', { maximumFractionDigits: 2 })
@@ -67,6 +68,7 @@ export default function HolyLiquid() {
   const [withdrawTo, setWithdrawTo] = useState('')
   const [modalBusy, setModalBusy] = useState(false)
   const [domReady, setDomReady] = useState(false)
+  const [showWelcome, setShowWelcome] = useState(false)
   const [recentRounds, setRecentRounds] = useState<HistoryRound[]>([])
   const [heroFontPx, setHeroFontPx] = useState(52)
   const [pnlFontPx, setPnlFontPx] = useState(15)
@@ -94,6 +96,12 @@ export default function HolyLiquid() {
   useEffect(() => {
     setDomReady(true)
   }, [])
+
+  useEffect(() => {
+    if (!domReady || typeof window === 'undefined') return
+    const seen = window.localStorage.getItem(WELCOME_SEEN_KEY) === '1'
+    if (!seen) setShowWelcome(true)
+  }, [domReady])
 
   useEffect(() => {
     if (typeof window === 'undefined') return
@@ -264,6 +272,14 @@ export default function HolyLiquid() {
     if (modalBusy) return
     playSfx('modalClose')
     setModal(null)
+  }
+
+  function dismissWelcome() {
+    if (typeof window !== 'undefined') {
+      window.localStorage.setItem(WELCOME_SEEN_KEY, '1')
+    }
+    playSfx('modalClose')
+    setShowWelcome(false)
   }
 
   async function submitDeposit() {
@@ -827,6 +843,30 @@ export default function HolyLiquid() {
         </div>
         </div>
       </div>
+
+      {/* ── FIRST-VISIT WELCOME MODAL ── */}
+      {showWelcome && domReady && createPortal(
+        <div className="modal-backdrop welcome-backdrop" onClick={dismissWelcome}>
+          <div className="modal-card welcome-card" onClick={(e) => e.stopPropagation()}>
+            <div className="welcome-kicker">Welcome to HolyLiquid</div>
+            <div className="welcome-title">Flip your balance on 30-second ETH rounds</div>
+            <div className="welcome-steps">
+              <div className="welcome-step"><span>1</span>Pick your amount</div>
+              <div className="welcome-step"><span>2</span>Choose +PNL or −PNL</div>
+              <div className="welcome-step"><span>3</span>Win when the round settles</div>
+            </div>
+            <div className="welcome-notes">
+              <span>Live ETH price</span>
+              <span>USDC on Base</span>
+              <span>Cash out anytime</span>
+            </div>
+            <div className="welcome-ctas">
+              <button className="welcome-btn primary" onClick={dismissWelcome}>Start Playing</button>
+              <button className="welcome-btn ghost" onClick={dismissWelcome}>Watch a Round First</button>
+            </div>
+          </div>
+        </div>
+      , document.body)}
 
       {/* ── DEPOSIT / WITHDRAW MODAL ── */}
       {modal && domReady && createPortal(
