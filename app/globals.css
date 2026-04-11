@@ -981,3 +981,101 @@ html, body, #__next { width: 100%; min-height: 100%; }
     border-color: rgba(154,121,255,.45);
   }
 }
+
+/* ── LIVE ACTIVITY TICKER ─────────────────────────────────── */
+.live-ticker {
+  position: fixed;
+  left: 8px;
+  top: 25%;
+  bottom: 25%;
+  width: 110px;
+  pointer-events: none;
+  z-index: 40;
+  overflow: hidden;
+  mask-image: linear-gradient(to bottom, transparent 0%, black 12%, black 88%, transparent 100%);
+  -webkit-mask-image: linear-gradient(to bottom, transparent 0%, black 12%, black 88%, transparent 100%);
+}
+
+.live-ticker--empty { display: none; }
+
+.live-ticker__inner {
+  display: flex;
+  flex-direction: column-reverse;
+  gap: 6px;
+  padding: 4px;
+  height: 100%;
+  overflow: hidden;
+}
+
+.tick-item {
+  background: rgba(8, 6, 18, 0.78);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 9px;
+  padding: 8px 10px;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 5px;
+  color: rgba(255, 255, 255, 0.92);
+  animation: tickIn 0.45s cubic-bezier(.34, 1.56, .64, 1);
+  flex-shrink: 0;
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.3);
+}
+
+.tick-item--bet  { border-left: 2px solid rgba(123, 44, 255, .8); }
+.tick-item--win  { border-left: 2px solid rgba(125, 242, 168, .9); }
+.tick-item--loss { border-left: 2px solid rgba(255, 124, 152, .8); }
+
+.tick-verb {
+  font-size: 8.5px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  color: rgba(255, 255, 255, 0.55);
+}
+.tick-verb--win  { color: rgba(125, 242, 168, .85); }
+.tick-verb--loss { color: rgba(255, 124, 152, .85); }
+
+.tick-amount {
+  font-size: 13px;
+  font-weight: 900;
+  font-feature-settings: "tnum";
+  letter-spacing: -0.01em;
+}
+.tick-amount--win  { color: #7df2a8; }
+.tick-amount--loss { color: #ff7c98; }
+
+.tick-side {
+  font-size: 8.5px;
+  font-weight: 800;
+  padding: 2px 5px;
+  border-radius: 4px;
+  letter-spacing: .05em;
+}
+.tick-side--pos { background: rgba(125, 242, 168, .15); color: #7df2a8; }
+.tick-side--neg { background: rgba(255, 124, 152, .15); color: #ff7c98; }
+
+@keyframes tickIn {
+  0%   { opacity: 0; transform: translateX(-24px) scale(0.9); }
+  60%  { opacity: 1; transform: translateX(2px) scale(1.02); }
+  100% { opacity: 1; transform: translateX(0) scale(1); }
+}
+
+/* Desktop: side rail in negative space outside the 430px column */
+@media (min-width: 1024px) {
+  .live-ticker {
+    left: calc(50% - 395px);
+    width: 180px;
+    top: 12%;
+    bottom: 12%;
+  }
+  .tick-item { padding: 12px 14px; gap: 5px 7px; }
+  .tick-verb { font-size: 10px; }
+  .tick-amount { font-size: 16px; }
+  .tick-side { font-size: 10px; padding: 3px 7px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .tick-item { animation: none; }
+}

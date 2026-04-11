@@ -5,6 +5,7 @@ import dynamic from 'next/dynamic'
 import { createPortal } from 'react-dom'
 import { usePrivy } from '@privy-io/react-auth'
 import { useRound, type LastResult } from '@/hooks/useRound'
+import { LiveTicker } from './components/LiveTicker'
 import { encodeFunctionData, parseUnits } from 'viem'
 
 const PriceWaterChart = dynamic(() => import('@/components/game/PriceWaterChart'), { ssr: false })
@@ -842,6 +843,7 @@ export default function HolyLiquid() {
 
   return (
     <div className="hl-root">
+      <LiveTicker />
 
       {/* ── SCENE — contains chart + UI in an isolated stacking context ── */}
       <div
