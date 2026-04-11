@@ -114,11 +114,15 @@ export default function PriceWaterChart({ priceHistory, pnlPos }: Props) {
     let smoothedMax = 0
     let smoothedMid = 0
     let smoothedPaddedRange = 1
+    let rawPrices: number[] = []
+    let rawMid = 0
+    let rawPaddedRange = 1
 
     function refreshSmoothedPrices(prices: number[]) {
       smoothedPrices = emaSmooth(prices, 0.18)
+      rawPrices = prices.slice()
       if (smoothedPrices.length === 0) {
-        smoothedMin = 0; smoothedMax = 0; smoothedMid = 0; smoothedPaddedRange = 1
+        smoothedMin = 0; smoothedMax = 0; smoothedMid = 0; smoothedPaddedRange = 1; rawMid = 0; rawPaddedRange = 1
         return
       }
       let mn = smoothedPrices[0], mx = smoothedPrices[0]
@@ -135,6 +139,14 @@ export default function PriceWaterChart({ priceHistory, pnlPos }: Props) {
       smoothedMax = mx
       smoothedMid = (mx + mn) / 2
       smoothedPaddedRange = padded
+      let rmn = rawPrices[0], rmx = rawPrices[0]
+      for (let i = 1; i < rawPrices.length; i++) {
+        const p = rawPrices[i]
+        if (p < rmn) rmn = p
+        if (p > rmx) rmx = p
+      }
+      rawMid = (rmx + rmn) / 2
+      rawPaddedRange = Math.max((rmx - rmn) * 1.4, Math.abs(rmx) * 0.0018, 1e-9)
     }
 
     function getBaseY(x: number, W: number, H: number): number {
