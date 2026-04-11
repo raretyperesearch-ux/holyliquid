@@ -1,0 +1,176 @@
+import { db, getSupabaseClient } from './db'
+import { Round } from './types'
+import crypto from 'crypto'
+
+// 4 seeded bot wallets. Balances tracked in hl_balances like any other wallet.
+const BOT_WALLETS = [
+  '0xb07a000000000000000000000000000000007001',
+  '0xb07a000000000000000000000000000000007002',
+  '0xb07a000000000000000000000000000000007003',
+  '0xb07a000000000000000000000000000000007004',
+]
+
+// Bet sizes the bots choose from. Skewed toward small bets.
+const BET_AMOUNTS = [1, 1, 2, 2, 3, 5]
+
+// Each bot bets on this fraction of rounds (independent per bot).
+const BET_PROBABILITY = 0.65
+
+// Random delay (ms) after a round opens before a bot fires its bet.
+// Spread across the betting window so they don't all bet at the same instant.
+const MIN_DELAY_MS = 1500
+const MAX_DELAY_MS = 7500
+
+// Don't let any bot drop below this balance — they sit out until rebalanced.
+const MIN_BALANCE_FLOOR = 5
+
+// Rebalance bounds. If a bot drifts outside these, it gets nudged back to $200.
+const REBALANCE_LOW  = 50
+const REBALANCE_HIGH = 500
+const REBALANCE_TARGET = 200
+
+const random = <T>(arr: T[]): T => arr[Math.floor(Math.random() * arr.length)]
+const randomInt = (min: number, max: number) => Math.floor(Math.random() * (max - min + 1)) + min
+
+/**
+ * Schedule bot bets for a freshly-opened round. Fires bets on a random delay
+ * within the betting window so they don't cluster at t=0.
+ *
+ * Safe to call even if BOTS_ENABLED is false — it no-ops.
+ */
+export function scheduleBotBets(round: Round): void {
+  if (process.env.BOTS_ENABLED !== 'true') return
+
+  const bettingClosesAt = new Date(round.betting_closes_at).getTime()
+  const now = Date.now()
+  const remainingWindow = bettingClosesAt - now
+
+  // If we're already past the betting window or it's tiny, skip
+  if (remainingWindow < MIN_DELAY_MS + 500) {
+    console.log(`[Bots] Round #${round.round_number}: betting window too short (${remainingWindow}ms), skipping`)
+    return
+  }
+
+  for (const wallet of BOT_WALLETS) {
+    if (Math.random() > BET_PROBABILITY) continue
+
+    // Cap the delay so we don't bet after the window closes
+    const maxDelay = Math.min(MAX_DELAY_MS, remainingWindow - 500)
+    const delay = randomInt(MIN_DELAY_MS, maxDelay)
+
+    setTimeout(() => {
+      placeBotBet(wallet, round).catch(err => {
+        console.warn(`[Bots] ${shortWallet(wallet)} bet failed:`, err?.message || err)
+      })
+    }, delay)
+  }
+}
+
+async function placeBotBet(wallet: string, round: Round): Promise<void> {
+  const sb = getSupabaseClient()
+
+  // Check current balance — sit out if too low
+  const { data: bal } = await sb
+    .from('hl_balances')
+    .select('balance_usdc, locked_usdc')
+    .eq('wallet', wallet)
+    .single()
+
+  const available = (Number(bal?.balance_usdc) || 0) - (Number(bal?.locked_usdc) || 0)
+  if (available < MIN_BALANCE_FLOOR) {
+    console.log(`[Bots] ${shortWallet(wallet)} below floor ($${available.toFixed(2)}) — sitting out`)
+    return
+  }
+
+  const amount = Math.min(random(BET_AMOUNTS), Math.floor(available))
+  if (amount < 1) return
+
+  // Pick a side. Slight randomness — never always-pos or always-neg per bot.
+  const side: 'pos' | 'neg' = Math.random() < 0.5 ? 'pos' : 'neg'
+
+  // Verify the round is still open (could have locked while we were waiting)
+  const { data: roundCheck } = await sb
+    .from('hl_rounds')
+    .select('status, betting_closes_at')
+    .eq('id', round.id)
+    .single()
+
+  if (!roundCheck || roundCheck.status !== 'open') {
+    return // round already locked, don't bet
+  }
+  if (new Date(roundCheck.betting_closes_at).getTime() <= Date.now()) {
+    return // betting window expired
+  }
+
+  // Fire the bet via the same RPC real users use
+  const { error } = await sb.rpc('hl_place_bet', {
+    p_wallet: wallet,
+    p_amount: amount,
+    p_round_id: round.id,
+    p_side: side,
+    p_idempotency_key: crypto.randomUUID(),
+  })
+
+  if (error) {
+    // insufficient_balance, one_bet_per_wallet, etc — log but don't crash
+    console.log(`[Bots] ${shortWallet(wallet)} bet declined: ${error.message}`)
+    return
+  }
+
+  console.log(`[Bots] ${shortWallet(wallet)} bet $${amount} on ${side} (round #${round.round_number})`)
+}
+
+/**
+ * Periodically rebalance bot wallets that have drifted too high or too low.
+ * Keeps them roughly stable over time without manual intervention.
+ *
+ * Call once at startup; it self-schedules.
+ */
+export function startBotRebalancer(): void {
+  if (process.env.BOTS_ENABLED !== 'true') return
+
+  const REBALANCE_INTERVAL_MS = 5 * 60 * 1000 // every 5 minutes
+
+  const tick = async () => {
+    try {
+      const sb = getSupabaseClient()
+      const { data: rows } = await sb
+        .from('hl_balances')
+        .select('wallet, balance_usdc')
+        .in('wallet', BOT_WALLETS)
+
+      for (const row of rows ?? []) {
+        const balance = Number(row.balance_usdc)
+        if (balance < REBALANCE_LOW) {
+          const topUp = REBALANCE_TARGET - balance
+          await sb.rpc('hl_increase_balance', { p_wallet: row.wallet, p_amount: topUp })
+          await sb.from('hl_transactions').insert({
+            wallet: row.wallet, type: 'deposit', amount: topUp, note: 'bot rebalance top-up',
+          })
+          console.log(`[Bots] Rebalanced ${shortWallet(row.wallet)}: $${balance.toFixed(2)} → $${REBALANCE_TARGET}`)
+        } else if (balance > REBALANCE_HIGH) {
+          const skim = balance - REBALANCE_TARGET
+          // Direct UPDATE to skim — no helper for "decrease balance" currently
+          await sb.from('hl_balances')
+            .update({ balance_usdc: REBALANCE_TARGET, updated_at: new Date().toISOString() })
+            .eq('wallet', row.wallet)
+          await sb.from('hl_transactions').insert({
+            wallet: row.wallet, type: 'withdraw', amount: skim, note: 'bot rebalance skim',
+          })
+          console.log(`[Bots] Skimmed ${shortWallet(row.wallet)}: $${balance.toFixed(2)} → $${REBALANCE_TARGET}`)
+        }
+      }
+    } catch (e) {
+      console.warn('[Bots] Rebalance tick failed:', e)
+    }
+  }
+
+  // Run once on startup, then every interval
+  tick()
+  setInterval(tick, REBALANCE_INTERVAL_MS)
+  console.log('[Bots] Rebalancer started — will tick every 5 minutes')
+}
+
+function shortWallet(w: string): string {
+  return `bot:${w.slice(-4)}`
+}

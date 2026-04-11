@@ -9,6 +9,7 @@ import { connectOracle } from './oracle'
 import { resolveOrphanedRounds } from './recover'
 import { gameLoop } from './loop'
 import { startHealthServer } from './health'
+import { startBotRebalancer } from './bots'
 
 async function main() {
   console.log('[HolyLiquid] Starting round manager...')
@@ -26,6 +27,7 @@ async function main() {
   console.log('[HolyLiquid] ✓ Health server running on :3001')
 
   console.log('[HolyLiquid] All systems ready. Starting game loop.')
+  startBotRebalancer()
   await gameLoop()
 }
 
