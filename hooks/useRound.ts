@@ -53,9 +53,28 @@ export function useRound(accessToken: string | null) {
       if (!res.ok) return
       const json = await res.json()
       if (json.data?.round) {
-        setRound(json.data.round)
-        setMyBet(json.data.my_bet)
-        lastVersionRef.current = json.data.round.version
+        const incoming = json.data.round as RoundData
+        let keepCurrent = false
+        setRound(prev => {
+          if (!prev || prev.id === incoming.id) return incoming
+          const now = Date.now()
+          const prevClosesAt = new Date(prev.closes_at).getTime()
+          const incomingClosesAt = new Date(incoming.closes_at).getTime()
+          if (
+            Number.isFinite(prevClosesAt) &&
+            Number.isFinite(incomingClosesAt) &&
+            now < prevClosesAt &&
+            incomingClosesAt > prevClosesAt
+          ) {
+            keepCurrent = true
+            return prev
+          }
+          return incoming
+        })
+        if (!keepCurrent) {
+          setMyBet(json.data.my_bet)
+          lastVersionRef.current = incoming.version
+        }
       }
     } catch {}
     finally { setLoading(false) }
