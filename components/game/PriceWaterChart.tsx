@@ -79,6 +79,15 @@ export default function PriceWaterChart({ priceHistory, pnlPos }: Props) {
       DROPS.push({ x: Math.random(), y: Math.random(), len: 5+d*14, spd: 4+d*9, alpha: .12+d*.35, width: .5+d*.7, depth: d })
     }
     const RIPPLES: any[] = [], SPRAY: any[] = []
+    type FallingCoin = { x: number; y: number; vx: number; vy: number; life: number; spin: number; size: number }
+    const FALLING_COINS: FallingCoin[] = []
+    const DECK_COINS = [
+      { x: 2.5, y: -1.1, p: 0.0, r: 1.25 },
+      { x: 4.1, y: -1.4, p: 1.3, r: 1.1 },
+      { x: 5.4, y: -0.95, p: 2.1, r: 0.95 },
+      { x: 3.3, y: -1.8, p: 2.9, r: 0.82 },
+    ]
+    let nextCoinDropT = 1.8
     let lightningFlash = 0, lightningX = 0
     let cloudsInit = false
     let lastSceneWidth = 0
@@ -132,15 +141,23 @@ export default function PriceWaterChart({ priceHistory, pnlPos }: Props) {
       if (smoothedPrices.length === 0) return H * 0.5
       const ratio = x / Math.max(1, W - 1)
       const idx = ratio * (smoothedPrices.length - 1)
-      // 5-point weighted average across the spatial axis for extra smoothness
-      // on top of the temporal EMA. Catches inter-sample aliasing.
-      let v = 0, wt = 0
-      for (let d = -2; d <= 2; d++) {
-        const i = Math.max(0, Math.min(smoothedPrices.length - 1, Math.round(idx + d)))
-        const w = 1 / (Math.abs(d) + 1)
-        v += smoothedPrices[i] * w; wt += w
-      }
-      v /= wt
+      const i1 = Math.max(0, Math.min(smoothedPrices.length - 1, Math.floor(idx)))
+      const i2 = Math.max(0, Math.min(smoothedPrices.length - 1, i1 + 1))
+      const i0 = Math.max(0, Math.min(smoothedPrices.length - 1, i1 - 1))
+      const i3 = Math.max(0, Math.min(smoothedPrices.length - 1, i2 + 1))
+      const t = idx - i1
+      const p0 = smoothedPrices[i0]
+      const p1 = smoothedPrices[i1]
+      const p2 = smoothedPrices[i2]
+      const p3 = smoothedPrices[i3]
+      const t2 = t * t
+      const t3 = t2 * t
+      const v = 0.5 * (
+        (2 * p1) +
+        (-p0 + p2) * t +
+        (2 * p0 - 5 * p1 + 4 * p2 - p3) * t2 +
+        (-p0 + 3 * p1 - 3 * p2 + p3) * t3
+      )
       // Normalize against the padded range centered on mid — calmer, premium feel.
       const normalized = (v - (smoothedMid - smoothedPaddedRange / 2)) / smoothedPaddedRange
       // Clamp defensively so a noisy single sample can't shoot off-screen.
@@ -150,15 +167,11 @@ export default function PriceWaterChart({ priceHistory, pnlPos }: Props) {
 
     function getY(x: number, chop: number, t: number, W: number, H: number): number {
       const b = getBaseY(x, W, H)
-      // Procedural chop dialed back ~45% vs the original. The water should
-      // whisper on top of the real price curve, not karate-kick over it.
+      // Main waterline should be the chart path first; motion is subtle physics.
       return b
-        + Math.sin(x * .016 + t * 1.9) * 1.6 * chop
-        + Math.sin(x * .028 - t * 1.4) * 0.95 * chop
-        + Math.sin(x * .055 + t * 2.8) * 0.5
-        + Math.sin(x * .09  - t * 3.5) * 0.28 * chop
-        + Math.sin(x * .15  + t * 5)   * 0.14
-        + Math.sin(x * .24  - t * 6.5) * 0.08 * chop
+        + Math.sin(x * .02 + t * 1.6) * 0.55 * chop
+        + Math.sin(x * .038 - t * 1.25) * 0.35 * chop
+        + Math.sin(x * .08 + t * 2.2) * 0.14
     }
 
     function drawCloud(ctx: CanvasRenderingContext2D, cx: number, cy: number, cw: number, ch: number, alpha: number, blend: number) {
@@ -192,7 +205,7 @@ export default function PriceWaterChart({ priceHistory, pnlPos }: Props) {
       const targetBlend = st.pnlPos ? 1 : 0
       st.pnlBlend = lerp(st.pnlBlend, targetBlend, .025)
       const B = st.pnlBlend
-      const chop = lerp(1.85, 1, B)
+      const chop = lerp(1, 0.78, B)
 
       const { width: W, height: H, dpr } = sizeRef.current
       if (!W || !H) return  // not sized yet
@@ -222,7 +235,9 @@ export default function PriceWaterChart({ priceHistory, pnlPos }: Props) {
       refreshSmoothedPrices(prices)
 
       const s: number[] = []
-      for (let x = 0; x < W; x++) s.push(getY(x, chop, t, W, H))
+      for (let x = 0; x < W; x++) {
+        s.push(getY(x, chop, t, W, H))
+      }
       const skyH = s[0] + 8
       const rn = (n: number) => Math.round(n)
 
@@ -375,6 +390,32 @@ export default function PriceWaterChart({ priceHistory, pnlPos }: Props) {
       }
       ctx2.fillStyle=shimG; ctx2.fill()
 
+      // Right-edge live price marker follows the main waterline.
+      const markerX = W - 6
+      const markerY = s[Math.max(0, W - 1)]
+      const livePrice = prices.length ? prices[prices.length - 1] : null
+      const livePriceTxt = livePrice !== null && Number.isFinite(livePrice)
+        ? '$' + livePrice.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+        : '--'
+      ctx2.beginPath()
+      ctx2.arc(markerX, markerY, 2.7, 0, Math.PI * 2)
+      ctx2.fillStyle = B > .5 ? 'rgba(205,238,255,.95)' : 'rgba(188,205,255,.95)'
+      ctx2.fill()
+      const badgeW = Math.max(48, livePriceTxt.length * 6.1 + 8)
+      const badgeX = markerX - badgeW - 10
+      const badgeY = markerY - 8
+      ctx2.fillStyle = 'rgba(8,12,26,.72)'
+      ctx2.strokeStyle = B > .5 ? 'rgba(186,228,255,.45)' : 'rgba(166,178,255,.42)'
+      ctx2.lineWidth = 0.7
+      ctx2.beginPath()
+      ctx2.roundRect(badgeX, badgeY, badgeW, 14, 7)
+      ctx2.fill()
+      ctx2.stroke()
+      ctx2.fillStyle = B > .5 ? 'rgba(214,245,255,.95)' : 'rgba(209,218,255,.94)'
+      ctx2.font = '600 8.5px system-ui, sans-serif'
+      ctx2.textBaseline = 'middle'
+      ctx2.fillText(livePriceTxt, badgeX + 5, badgeY + 7)
+
       // FOAM — thin arc streaks (no circles)
       for(let x=3;x<W-3;x+=3){
         const y=s[x],yL=s[x-3]||y,yR=s[x+3]||y
@@ -479,7 +520,107 @@ export default function PriceWaterChart({ priceHistory, pnlPos }: Props) {
       ctx2.beginPath(); ctx2.arc(S*.9,.04,1.8,0,Math.PI*2)
       ctx2.fillStyle='rgba(100,220,130,.7)'; ctx2.fill()
 
+      // Treasury chest + premium gold details.
+      const chestX = S * .34
+      const chestY = -S * .42
+      const chestW = S * .66
+      const chestH = S * .36
+      const chestLid = S * .18
+
+      ctx2.beginPath()
+      ctx2.moveTo(chestX, chestY)
+      ctx2.lineTo(chestX + chestW, chestY)
+      ctx2.lineTo(chestX + chestW, chestY + chestH)
+      ctx2.lineTo(chestX, chestY + chestH)
+      ctx2.closePath()
+      const chestBodyG = ctx2.createLinearGradient(chestX, chestY, chestX, chestY + chestH)
+      chestBodyG.addColorStop(0, 'rgba(84,36,12,.98)')
+      chestBodyG.addColorStop(.55, 'rgba(52,20,6,.97)')
+      chestBodyG.addColorStop(1, 'rgba(28,10,4,.95)')
+      ctx2.fillStyle = chestBodyG
+      ctx2.fill()
+      ctx2.strokeStyle = 'rgba(225,168,92,.38)'
+      ctx2.lineWidth = .55
+      ctx2.stroke()
+
+      ctx2.beginPath()
+      ctx2.ellipse(chestX + chestW * .5, chestY - chestLid * .14, chestW * .52, chestLid, 0, Math.PI, Math.PI * 2)
+      const chestLidG = ctx2.createLinearGradient(chestX, chestY - chestLid, chestX, chestY + 1)
+      chestLidG.addColorStop(0, 'rgba(112,52,18,.97)')
+      chestLidG.addColorStop(1, 'rgba(54,20,8,.95)')
+      ctx2.fillStyle = chestLidG
+      ctx2.fill()
+      ctx2.strokeStyle = 'rgba(245,184,112,.36)'
+      ctx2.stroke()
+
+      for (const coin of DECK_COINS) {
+        const tw = .58 + .42 * Math.sin(t * 3.2 + coin.p)
+        const rr = coin.r * (0.9 + tw * .18)
+        ctx2.beginPath()
+        ctx2.arc(chestX + coin.x, chestY + coin.y, rr, 0, Math.PI * 2)
+        const coinG = ctx2.createRadialGradient(chestX + coin.x - .3, chestY + coin.y - .3, .1, chestX + coin.x, chestY + coin.y, rr)
+        coinG.addColorStop(0, `rgba(255,247,188,${.95 * tw})`)
+        coinG.addColorStop(.55, `rgba(244,200,76,${.82 * tw})`)
+        coinG.addColorStop(1, `rgba(186,128,34,${.78 * tw})`)
+        ctx2.fillStyle = coinG
+        ctx2.fill()
+
+        if (tw > .92) {
+          ctx2.beginPath()
+          ctx2.moveTo(chestX + coin.x - 1.2, chestY + coin.y)
+          ctx2.lineTo(chestX + coin.x + 1.2, chestY + coin.y)
+          ctx2.moveTo(chestX + coin.x, chestY + coin.y - 1.2)
+          ctx2.lineTo(chestX + coin.x, chestY + coin.y + 1.2)
+          ctx2.strokeStyle = `rgba(255,244,186,${(tw - .9) * 2.5})`
+          ctx2.lineWidth = .35
+          ctx2.stroke()
+        }
+      }
+
+      if (t > nextCoinDropT && FALLING_COINS.length < 4 && Math.random() < .05) {
+        const localX = chestX + chestW * .78
+        const localY = chestY - chestLid * .22
+        const ct = Math.cos(st.boatTilt)
+        const stn = Math.sin(st.boatTilt)
+        FALLING_COINS.push({
+          x: st.boatX + localX * ct - localY * stn,
+          y: st.boatY + bob + localX * stn + localY * ct,
+          vx: st.boatVX * .06 + .25 + Math.random() * .35,
+          vy: -(.6 + Math.random() * .4),
+          life: 1,
+          spin: Math.random() * Math.PI * 2,
+          size: .9 + Math.random() * .7,
+        })
+        nextCoinDropT = t + 2.8 + Math.random() * 2.6
+      }
+
       ctx2.restore()
+
+      for (let i = FALLING_COINS.length - 1; i >= 0; i--) {
+        const c = FALLING_COINS[i]
+        c.x += c.vx
+        c.y += c.vy
+        c.vy += .048
+        c.spin += .18
+        c.life -= .013
+        const xi = Math.max(0, Math.min(W - 1, Math.round(c.x)))
+        if (c.life <= 0 || c.y > s[xi] + 12) {
+          FALLING_COINS.splice(i, 1)
+          continue
+        }
+        const a = Math.max(0, c.life * .85)
+        const stretch = .55 + .45 * Math.abs(Math.sin(c.spin))
+        ctx2.beginPath()
+        ctx2.ellipse(c.x, c.y, c.size * stretch, c.size * .72, c.spin, 0, Math.PI * 2)
+        ctx2.fillStyle = `rgba(245,196,70,${a})`
+        ctx2.fill()
+        if (Math.sin(c.spin * 1.7) > .84) {
+          ctx2.beginPath()
+          ctx2.arc(c.x, c.y, c.size * .35, 0, Math.PI * 2)
+          ctx2.fillStyle = `rgba(255,245,196,${a * .75})`
+          ctx2.fill()
+        }
+      }
     }
 
     draw()
