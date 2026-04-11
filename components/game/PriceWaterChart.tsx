@@ -79,6 +79,15 @@ export default function PriceWaterChart({ priceHistory, pnlPos }: Props) {
       DROPS.push({ x: Math.random(), y: Math.random(), len: 5+d*14, spd: 4+d*9, alpha: .12+d*.35, width: .5+d*.7, depth: d })
     }
     const RIPPLES: any[] = [], SPRAY: any[] = []
+    type FallingCoin = { x: number; y: number; vx: number; vy: number; life: number; spin: number; size: number }
+    const FALLING_COINS: FallingCoin[] = []
+    const DECK_COINS = [
+      { x: 2.5, y: -1.1, p: 0.0, r: 1.25 },
+      { x: 4.1, y: -1.4, p: 1.3, r: 1.1 },
+      { x: 5.4, y: -0.95, p: 2.1, r: 0.95 },
+      { x: 3.3, y: -1.8, p: 2.9, r: 0.82 },
+    ]
+    let nextCoinDropT = 1.8
     let lightningFlash = 0, lightningX = 0
     let cloudsInit = false
     let lastSceneWidth = 0
@@ -523,7 +532,107 @@ export default function PriceWaterChart({ priceHistory, pnlPos }: Props) {
       ctx2.beginPath(); ctx2.arc(S*.9,.04,1.8,0,Math.PI*2)
       ctx2.fillStyle='rgba(100,220,130,.7)'; ctx2.fill()
 
+      // Treasury chest + premium gold details.
+      const chestX = S * .34
+      const chestY = -S * .42
+      const chestW = S * .66
+      const chestH = S * .36
+      const chestLid = S * .18
+
+      ctx2.beginPath()
+      ctx2.moveTo(chestX, chestY)
+      ctx2.lineTo(chestX + chestW, chestY)
+      ctx2.lineTo(chestX + chestW, chestY + chestH)
+      ctx2.lineTo(chestX, chestY + chestH)
+      ctx2.closePath()
+      const chestBodyG = ctx2.createLinearGradient(chestX, chestY, chestX, chestY + chestH)
+      chestBodyG.addColorStop(0, 'rgba(84,36,12,.98)')
+      chestBodyG.addColorStop(.55, 'rgba(52,20,6,.97)')
+      chestBodyG.addColorStop(1, 'rgba(28,10,4,.95)')
+      ctx2.fillStyle = chestBodyG
+      ctx2.fill()
+      ctx2.strokeStyle = 'rgba(225,168,92,.38)'
+      ctx2.lineWidth = .55
+      ctx2.stroke()
+
+      ctx2.beginPath()
+      ctx2.ellipse(chestX + chestW * .5, chestY - chestLid * .14, chestW * .52, chestLid, 0, Math.PI, Math.PI * 2)
+      const chestLidG = ctx2.createLinearGradient(chestX, chestY - chestLid, chestX, chestY + 1)
+      chestLidG.addColorStop(0, 'rgba(112,52,18,.97)')
+      chestLidG.addColorStop(1, 'rgba(54,20,8,.95)')
+      ctx2.fillStyle = chestLidG
+      ctx2.fill()
+      ctx2.strokeStyle = 'rgba(245,184,112,.36)'
+      ctx2.stroke()
+
+      for (const coin of DECK_COINS) {
+        const tw = .58 + .42 * Math.sin(t * 3.2 + coin.p)
+        const rr = coin.r * (0.9 + tw * .18)
+        ctx2.beginPath()
+        ctx2.arc(chestX + coin.x, chestY + coin.y, rr, 0, Math.PI * 2)
+        const coinG = ctx2.createRadialGradient(chestX + coin.x - .3, chestY + coin.y - .3, .1, chestX + coin.x, chestY + coin.y, rr)
+        coinG.addColorStop(0, `rgba(255,247,188,${.95 * tw})`)
+        coinG.addColorStop(.55, `rgba(244,200,76,${.82 * tw})`)
+        coinG.addColorStop(1, `rgba(186,128,34,${.78 * tw})`)
+        ctx2.fillStyle = coinG
+        ctx2.fill()
+
+        if (tw > .92) {
+          ctx2.beginPath()
+          ctx2.moveTo(chestX + coin.x - 1.2, chestY + coin.y)
+          ctx2.lineTo(chestX + coin.x + 1.2, chestY + coin.y)
+          ctx2.moveTo(chestX + coin.x, chestY + coin.y - 1.2)
+          ctx2.lineTo(chestX + coin.x, chestY + coin.y + 1.2)
+          ctx2.strokeStyle = `rgba(255,244,186,${(tw - .9) * 2.5})`
+          ctx2.lineWidth = .35
+          ctx2.stroke()
+        }
+      }
+
+      if (t > nextCoinDropT && FALLING_COINS.length < 4 && Math.random() < .05) {
+        const localX = chestX + chestW * .78
+        const localY = chestY - chestLid * .22
+        const ct = Math.cos(st.boatTilt)
+        const stn = Math.sin(st.boatTilt)
+        FALLING_COINS.push({
+          x: st.boatX + localX * ct - localY * stn,
+          y: st.boatY + bob + localX * stn + localY * ct,
+          vx: st.boatVX * .06 + .25 + Math.random() * .35,
+          vy: -(.6 + Math.random() * .4),
+          life: 1,
+          spin: Math.random() * Math.PI * 2,
+          size: .9 + Math.random() * .7,
+        })
+        nextCoinDropT = t + 2.8 + Math.random() * 2.6
+      }
+
       ctx2.restore()
+
+      for (let i = FALLING_COINS.length - 1; i >= 0; i--) {
+        const c = FALLING_COINS[i]
+        c.x += c.vx
+        c.y += c.vy
+        c.vy += .048
+        c.spin += .18
+        c.life -= .013
+        const xi = Math.max(0, Math.min(W - 1, Math.round(c.x)))
+        if (c.life <= 0 || c.y > s[xi] + 12) {
+          FALLING_COINS.splice(i, 1)
+          continue
+        }
+        const a = Math.max(0, c.life * .85)
+        const stretch = .55 + .45 * Math.abs(Math.sin(c.spin))
+        ctx2.beginPath()
+        ctx2.ellipse(c.x, c.y, c.size * stretch, c.size * .72, c.spin, 0, Math.PI * 2)
+        ctx2.fillStyle = `rgba(245,196,70,${a})`
+        ctx2.fill()
+        if (Math.sin(c.spin * 1.7) > .84) {
+          ctx2.beginPath()
+          ctx2.arc(c.x, c.y, c.size * .35, 0, Math.PI * 2)
+          ctx2.fillStyle = `rgba(255,245,196,${a * .75})`
+          ctx2.fill()
+        }
+      }
     }
 
     draw()
