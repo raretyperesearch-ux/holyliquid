@@ -453,31 +453,30 @@ export default function HolyLiquid() {
     : round.status === 'void' ? 'void'
     : 'loading'
 
-  // Timing spans derived from backend timestamps (defensive fallback keeps ratios finite).
-  const totalWatchingMs = (() => {
-    if (!round) return 1
-    const closes = new Date(round.closes_at).getTime()
-    const lock   = new Date(round.betting_closes_at).getTime()
-    if (!Number.isFinite(closes) || !Number.isFinite(lock) || closes <= lock) return 1
-    return closes - lock
-  })()
-
-  const timerSec = Math.ceil(Math.max(0, countdown.close) / 1000)
+  const roundRemainingMs = Math.max(0, countdown.close)
+  const timerSec = Math.ceil(roundRemainingMs / 1000)
 
   // Final 10 seconds of betting → pulse + "LAST CALL"
   const isFinalCountdown = phase === 'betting' && countdown.lock > 0 && countdown.lock <= 10_000
 
   const timerDisplay = `0:${String(Math.max(0, timerSec)).padStart(2, '0')}`
 
-  const totalRoundMs = (() => {
-    if (!round) return 1
+  const { totalRoundMs, lockMarkerPct } = (() => {
+    if (!round) return { totalRoundMs: 1, lockMarkerPct: 0 }
     const opens = new Date(round.open_price_ts).getTime()
+    const lock = new Date(round.betting_closes_at).getTime()
     const closes = new Date(round.closes_at).getTime()
-    if (!Number.isFinite(opens) || !Number.isFinite(closes) || closes <= opens) return 1
-    return closes - opens
+    if (!Number.isFinite(opens) || !Number.isFinite(lock) || !Number.isFinite(closes) || closes <= opens) {
+      return { totalRoundMs: 1, lockMarkerPct: 0 }
+    }
+    const total = closes - opens
+    const lockAtRemaining = Math.max(0, closes - lock)
+    return {
+      totalRoundMs: total,
+      lockMarkerPct: (lockAtRemaining / total) * 100,
+    }
   })()
-  const progressPct = (Math.max(0, countdown.close) / totalRoundMs) * 100
-  const lockMarkerPct = (totalWatchingMs / totalRoundMs) * 100
+  const progressPct = (roundRemainingMs / totalRoundMs) * 100
 
   const phaseLabel = phase === 'betting'
     ? (isFinalCountdown ? '● LAST CALL' : '● GET IN NOW')
