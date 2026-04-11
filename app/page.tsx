@@ -9,6 +9,7 @@ import { useRound } from '@/hooks/useRound'
 const PriceWaterChart = dynamic(() => import('@/components/game/PriceWaterChart'), { ssr: false })
 
 const CHIPS = [5, 10, 25, 50, 100]
+const MVP_ASSET_LABEL = 'ETH'
 
 function fmt(n: number) {
   return n.toLocaleString('en-US', { maximumFractionDigits: 2 })
@@ -119,8 +120,7 @@ export default function HolyLiquid() {
 
   useEffect(() => { if (accessToken) fetchBalance() }, [accessToken, fetchBalance])
 
-  // Track price history per round — reset on round rollover and on asset swap.
-  // Keyed on round.id so same-pair rollovers also start fresh.
+  // Track price history per round. Keyed on round.id so each rollover starts fresh.
   const lastRoundRef = useRef<string | null>(null)
   useEffect(() => {
     if (!round?.current_price || !round?.pair || !round?.id) return
@@ -422,11 +422,10 @@ export default function HolyLiquid() {
     : '#FFB300'
 
   const posLabel = round
-    ? `${round.pair.replace('/USD','')} ${round.direction.toUpperCase()} · ${round.leverage}× · $${Math.round(round.position_size/1000)}k`
+    ? `${MVP_ASSET_LABEL} ${round.direction.toUpperCase()} · ${round.leverage}× · $${Math.round(round.position_size/1000)}k`
     : 'Loading...'
 
-  // Price formatting for the context strip — handles BTC ($60k), ETH ($2k),
-  // SOL ($150) with reasonable decimal places.
+  // Price formatting for the context strip.
   function fmtPrice(n: number | undefined | null): string {
     if (n === undefined || n === null || !Number.isFinite(n)) return '---'
     const abs = Math.abs(n)
