@@ -74,7 +74,6 @@ export default function HolyLiquid() {
   const [depositTokenContract, setDepositTokenContract] = useState<string | null>(null)
   const [treasuryLoaded, setTreasuryLoaded] = useState(false)
   const [depositAmount, setDepositAmount] = useState('')
-  const [showManualDeposit, setShowManualDeposit] = useState(false)
   const [withdrawAmount, setWithdrawAmount] = useState('')
   const [withdrawTo, setWithdrawTo] = useState('')
   const [modalBusy, setModalBusy] = useState(false)
@@ -296,7 +295,6 @@ export default function HolyLiquid() {
   function openDeposit() {
     playSfx('modalOpen')
     setDepositAmount('')
-    setShowManualDeposit(false)
     setModal('deposit')
   }
   function openWithdraw() {
@@ -424,67 +422,6 @@ export default function HolyLiquid() {
     } catch (e) {
       playSfx('invalid')
       showToast(e instanceof Error ? e.message : 'Deposit failed', '#ff7c98')
-    } finally {
-      setModalBusy(false)
-    }
-  }
-
-  async function submitDepositAuto() {
-    if (!accessToken) return
-    const amt = Number(depositAmount)
-    if (!Number.isFinite(amt) || amt <= 0) {
-      return showToast('Enter a valid amount', '#ff7c98')
-    }
-    if (!treasuryWallet || !depositTokenContract) {
-      return showToast('Deposit route unavailable', '#ff7c98')
-    }
-    const fromWallet = user?.wallet?.address
-    const eth = (window as typeof window & { ethereum?: { request: (args: { method: string; params?: unknown[] }) => Promise<unknown> } }).ethereum
-    if (!fromWallet || !eth) {
-      setShowManualDeposit(true)
-      return showToast('Wallet send unavailable — use manual tx hash', '#ffcf85')
-    }
-
-    setModalBusy(true)
-    showToast('Awaiting wallet confirmation…', '#9fd2ff')
-    try {
-      const txData = encodeFunctionData({
-        abi: [{
-          type: 'function',
-          name: 'transfer',
-          stateMutability: 'nonpayable',
-          inputs: [{ name: 'to', type: 'address' }, { name: 'value', type: 'uint256' }],
-          outputs: [{ name: '', type: 'bool' }],
-        }],
-        functionName: 'transfer',
-        args: [treasuryWallet as `0x${string}`, parseUnits(String(amt), 6)],
-      })
-
-      const txHash = await eth.request({
-        method: 'eth_sendTransaction',
-        params: [{
-          from: fromWallet,
-          to: depositTokenContract,
-          data: txData,
-          value: '0x0',
-          chainId: '0x2105', // Base mainnet
-        }],
-      }) as string
-
-      if (!txHash?.startsWith('0x')) throw new Error('Wallet transaction failed')
-
-      showToast('Verifying deposit…', '#9fd2ff')
-      const credited = await creditDeposit(txHash, amt)
-      if (!credited.ok) throw new Error(credited.error)
-
-      playSfx('confirm')
-      showToast(`Deposited $${fmt(credited.data.amount_credited)}`, '#7df2a8')
-      fetchBalance()
-      setModal(null)
-    } catch (e) {
-      playSfx('invalid')
-      showToast(e instanceof Error ? e.message : 'Deposit failed', '#ff7c98')
-      setShowManualDeposit(true)
     } finally {
       setModalBusy(false)
     }
@@ -1081,7 +1018,7 @@ export default function HolyLiquid() {
               <>
                 <div className="modal-title">Deposit USDC</div>
                 <div className="modal-sub">
-                  Deposit USDC on <strong>Base</strong> in one tap. We auto-capture your tx hash and verify on-chain before crediting.
+                  Deposit USDC on <strong>Base</strong> in one tap. Confirm the transfer in your wallet and we&apos;ll credit your balance automatically.
                 </div>
                 <div className="modal-field">
                   <label>Treasury Wallet</label>
