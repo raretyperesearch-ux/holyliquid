@@ -56,10 +56,77 @@ type HistoryRound = {
   neg_pool?: number
 }
 
+function LastResultBanner({
+  result,
+  onClose,
+}: {
+  result: {
+    outcome: 'win' | 'loss' | 'void'
+    bet_amount: number
+    winnings: number
+    round_number: number
+    void_reason: string | null
+  } | null
+  onClose: () => void
+}) {
+  useEffect(() => {
+    if (!result) return
+    const t = setTimeout(onClose, 4500)
+    return () => clearTimeout(t)
+  }, [result, onClose])
+
+  if (!result) return null
+
+  const isWin  = result.outcome === 'win'
+  const isVoid = result.outcome === 'void'
+  const title  = isWin ? 'YOU WON' : isVoid ? 'VOIDED' : 'YOU LOST'
+  const color  = isWin ? '#7df2a8' : isVoid ? '#9aa6c4' : '#ff7c98'
+  const profit = isWin ? result.winnings - result.bet_amount : 0
+
+  return (
+    <div
+      role="status"
+      aria-live="polite"
+      onClick={onClose}
+      style={{
+        position: 'fixed',
+        top: '50%',
+        left: '50%',
+        transform: 'translate(-50%, -50%)',
+        background: 'rgba(8, 12, 24, 0.92)',
+        border: `2px solid ${color}`,
+        borderRadius: 16,
+        padding: '28px 44px',
+        textAlign: 'center',
+        boxShadow: `0 0 60px ${color}55`,
+        zIndex: 9999,
+        pointerEvents: 'auto',
+        cursor: 'pointer',
+        backdropFilter: 'blur(8px)',
+      }}
+    >
+      <div style={{ fontSize: 12, color: '#9aa6c4', letterSpacing: 2 }}>
+        ROUND #{result.round_number}
+      </div>
+      <div style={{ fontSize: 36, fontWeight: 800, color, margin: '6px 0' }}>
+        {title}
+      </div>
+      <div style={{ fontSize: 18, color: '#e9edf7' }}>
+        {isWin
+          ? `+$${profit.toFixed(2)} profit · $${result.winnings.toFixed(2)} returned`
+          : isVoid
+          ? `$${result.bet_amount.toFixed(2)} refunded${result.void_reason === 'one_sided_pool' ? ' · no opponent' : ''}`
+          : `−$${result.bet_amount.toFixed(2)}`}
+      </div>
+    </div>
+  )
+}
+
 export default function HolyLiquid() {
   const { ready, authenticated, login, getAccessToken, user } = usePrivy()
   const [accessToken, setAccessToken] = useState<string | null>(null)
   const [balance, setBalance] = useState<number | null>(null)
+  const fetchBalanceRef = useRef<() => Promise<void>>(async () => {})
   const [selectedChip, setSelectedChip] = useState(10)
   const [selectedSide, setSelectedSide] = useState<'pos' | 'neg' | null>(null)
   const [betting, setBetting] = useState(false)
@@ -152,7 +219,9 @@ export default function HolyLiquid() {
     window.localStorage.setItem('hl:selectedChip', String(selectedChip))
   }, [selectedChip])
 
-  const { round, myBet, refetch } = useRound(accessToken)
+  const { round, myBet, refetch, lastResult, clearLastResult } = useRound(accessToken, {
+    onResult: useCallback(() => { fetchBalanceRef.current() }, []),
+  })
 
   const fetchBalance = useCallback(async () => {
     if (!accessToken) return
@@ -163,6 +232,7 @@ export default function HolyLiquid() {
     } catch {}
   }, [accessToken])
 
+  useEffect(() => { fetchBalanceRef.current = fetchBalance }, [fetchBalance])
   useEffect(() => { if (accessToken) fetchBalance() }, [accessToken, fetchBalance])
 
   // Keep ETH trace continuous across round boundaries for a single live-market feel.
@@ -461,16 +531,31 @@ export default function HolyLiquid() {
     finally { setModalBusy(false) }
   }
 
-  // When a round settles and the user had a bet, flash the scene green/red
+  // Drive win/loss/void flash from `lastResult` (set by useRound) so it
+  // fires even when /api/rounds/current has already swapped to the next round.
   useEffect(() => {
-    if (!round || round.status !== 'settled') return
-    if (lastSettledIdRef.current === round.id) return
-    lastSettledIdRef.current = round.id
+    if (!lastResult) return
+    if (lastSettledIdRef.current === lastResult.round_id) return
+    lastSettledIdRef.current = lastResult.round_id
     let t: ReturnType<typeof setTimeout> | undefined
-    if (myBet?.won === true)  { playSfx('win'); setSettleFlash('win');  t = setTimeout(() => setSettleFlash(null), 1300) }
-    if (myBet?.won === false) { playSfx('loss'); setSettleFlash('loss'); t = setTimeout(() => setSettleFlash(null), 1300) }
+    if (lastResult.outcome === 'win') {
+      playSfx('win')
+      setSettleFlash('win')
+      t = setTimeout(() => setSettleFlash(null), 1300)
+    } else if (lastResult.outcome === 'loss') {
+      playSfx('loss')
+      setSettleFlash('loss')
+      t = setTimeout(() => setSettleFlash(null), 1300)
+    } else if (lastResult.outcome === 'void') {
+      showToast(
+        lastResult.void_reason === 'one_sided_pool'
+          ? 'Round voided — no opponent. Stake refunded.'
+          : 'Round voided. Stake refunded.',
+        '#9aa6c4'
+      )
+    }
     return () => { if (t) clearTimeout(t) }
-  }, [round?.id, round?.status, myBet?.won, playSfx])
+  }, [lastResult, playSfx])
 
   useEffect(() => {
     let cancelled = false
@@ -1107,6 +1192,8 @@ export default function HolyLiquid() {
           {toast.msg}
         </div>
       )}
+
+      <LastResultBanner result={lastResult} onClose={clearLastResult} />
     </div>
   )
 }
