@@ -47,7 +47,7 @@ function pnlFontSize(valueText: string): string {
   return '15px'
 }
 
-type ModalKind = null | 'deposit' | 'withdraw'
+type ModalKind = null | 'deposit' | 'withdraw' | 'custom'
 type HistoryRound = {
   round_number: number
   result: 'pos' | 'neg' | 'void' | null
@@ -185,6 +185,7 @@ export default function HolyLiquid() {
   const [depositTokenContract, setDepositTokenContract] = useState<string | null>(null)
   const [treasuryLoaded, setTreasuryLoaded] = useState(false)
   const [depositAmount, setDepositAmount] = useState('')
+  const [customAmount, setCustomAmount] = useState('')
   const [withdrawAmount, setWithdrawAmount] = useState('')
   const [withdrawTo, setWithdrawTo] = useState('')
   const [modalBusy, setModalBusy] = useState(false)
@@ -574,6 +575,22 @@ export default function HolyLiquid() {
     } finally {
       setModalBusy(false)
     }
+  }
+
+  function submitCustomChip() {
+    const n = Math.floor(Number(customAmount))
+    if (!Number.isFinite(n) || n <= 0) {
+      playSfx('invalid')
+      return showToast('Enter a valid amount', '#ff7c98')
+    }
+    const capped = balance !== null ? Math.min(n, Math.floor(balance)) : n
+    if (capped <= 0) {
+      playSfx('invalid')
+      return showToast('Insufficient balance', '#ff7c98')
+    }
+    playSfx('chip')
+    setSelectedChip(capped)
+    setModal(null)
   }
 
   async function submitWithdraw() {
@@ -1030,20 +1047,9 @@ export default function HolyLiquid() {
                   </div>
                 ))}
                 <div className="chip" style={{ fontSize: 9 }} onClick={() => {
-                  playSfx('chip')
-                  const raw = window.prompt('Enter bet amount (USD)')
-                  if (raw === null) return
-                  const n = Math.floor(Number(raw))
-                  if (!Number.isFinite(n) || n <= 0) {
-                    playSfx('invalid')
-                    return showToast('Enter a valid amount', '#ff7c98')
-                  }
-                  const capped = balance !== null ? Math.min(n, Math.floor(balance)) : n
-                  if (capped <= 0) {
-                    playSfx('invalid')
-                    return showToast('Insufficient balance', '#ff7c98')
-                  }
-                  setSelectedChip(capped)
+                  playSfx('modalOpen')
+                  setCustomAmount(String(selectedChip))
+                  setModal('custom')
                 }}>
                   CUSTOM
                 </div>
@@ -1235,6 +1241,39 @@ export default function HolyLiquid() {
                 </div>
                 <div className="modal-btns">
                   <button className="mb cancel" disabled={modalBusy} onClick={closeModal}>Cancel</button>
+                </div>
+              </>
+            )}
+
+            {modal === 'custom' && (
+              <>
+                <div className="modal-title">Custom Bet Amount</div>
+                <div className="modal-sub">
+                  Enter any amount in whole dollars. We&apos;ll clamp it to your available balance if needed.
+                </div>
+                <div className="modal-field">
+                  <label>Amount (USD)</label>
+                  <input
+                    className="modal-input"
+                    type="number"
+                    inputMode="numeric"
+                    min="1"
+                    step="1"
+                    placeholder="7"
+                    value={customAmount}
+                    onChange={(e) => setCustomAmount(e.target.value)}
+                    onKeyDown={(e) => { if (e.key === 'Enter') submitCustomChip() }}
+                    autoFocus
+                  />
+                </div>
+                {balance !== null && (
+                  <div className="modal-sub" style={{ textAlign: 'right' }}>
+                    Available: <strong style={{ color: '#7df2a8' }}>${fmt(balance)}</strong>
+                  </div>
+                )}
+                <div className="modal-btns">
+                  <button className="mb cancel" onClick={closeModal}>Cancel</button>
+                  <button className="mb submit" onClick={submitCustomChip}>Set Amount</button>
                 </div>
               </>
             )}
