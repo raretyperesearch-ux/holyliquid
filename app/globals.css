@@ -108,12 +108,17 @@ html, body, #__next { width: 100%; min-height: 100%; }
 
 /* HEADER */
 .hl-hdr {
-  display:grid;
-  grid-template-columns: auto 1fr;
+  display:flex;
   align-items:center;
   width:100%;
-  gap:6px;
+  gap:8px;
 }
+.hl-hdr .logo-wrap { flex: 0 0 auto; margin-right: auto; }
+.hl-hdr .sound-toggle { flex: 0 0 auto; }
+.hl-hdr .account-isl,
+.hl-hdr .connect-pill,
+.hl-hdr .skeleton-account { flex: 0 0 auto; }
+.hl-hdr .hdr-util-dot { display: none; }
 .logo-wrap .ltxt { font-size:22px;font-weight:900;letter-spacing:.16em;background:linear-gradient(90deg,#fff,rgba(255,255,255,.7));-webkit-background-clip:text;-webkit-text-fill-color:transparent }
 .bal-isl { padding:8px 14px;text-align:right }
 .bal-isl .bl { font-size:8px;letter-spacing:.3em;color:rgba(255,255,255,.35);text-transform:uppercase }

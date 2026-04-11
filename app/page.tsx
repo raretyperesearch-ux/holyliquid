@@ -349,14 +349,14 @@ export default function HolyLiquid() {
     gain.connect(ctx.destination)
 
     const presets = {
-      chip:      { freq: 620, end: 700, dur: 0.06, vol: 0.05, type: 'triangle' as OscillatorType },
-      side:      { freq: 420, end: 510, dur: 0.08, vol: 0.055, type: 'sine' as OscillatorType },
-      confirm:   { freq: 360, end: 660, dur: 0.12, vol: 0.07, type: 'triangle' as OscillatorType },
-      invalid:   { freq: 220, end: 170, dur: 0.09, vol: 0.06, type: 'sawtooth' as OscillatorType },
-      modalOpen: { freq: 520, end: 430, dur: 0.08, vol: 0.05, type: 'sine' as OscillatorType },
-      modalClose:{ freq: 390, end: 290, dur: 0.07, vol: 0.045, type: 'sine' as OscillatorType },
-      win:       { freq: 520, end: 820, dur: 0.16, vol: 0.075, type: 'triangle' as OscillatorType },
-      loss:      { freq: 320, end: 180, dur: 0.16, vol: 0.065, type: 'square' as OscillatorType },
+      chip:      { freq: 620, end: 700, dur: 0.06, vol: 0.35, type: 'triangle' as OscillatorType },
+      side:      { freq: 420, end: 510, dur: 0.08, vol: 0.4,  type: 'sine' as OscillatorType },
+      confirm:   { freq: 360, end: 660, dur: 0.12, vol: 0.5,  type: 'triangle' as OscillatorType },
+      invalid:   { freq: 220, end: 170, dur: 0.09, vol: 0.45, type: 'sawtooth' as OscillatorType },
+      modalOpen: { freq: 520, end: 430, dur: 0.08, vol: 0.35, type: 'sine' as OscillatorType },
+      modalClose:{ freq: 390, end: 290, dur: 0.07, vol: 0.3,  type: 'sine' as OscillatorType },
+      win:       { freq: 520, end: 820, dur: 0.16, vol: 0.5,  type: 'triangle' as OscillatorType },
+      loss:      { freq: 320, end: 180, dur: 0.16, vol: 0.45, type: 'square' as OscillatorType },
     }[kind]
 
     osc.type = presets.type
