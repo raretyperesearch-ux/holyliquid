@@ -1,5 +1,6 @@
 import { PrivyClient } from '@privy-io/server-auth'
 import { NextRequest } from 'next/server'
+import { getLinkedEvmWallets, type LinkedEvmWallet } from './server/privyWallet'
 
 let _privy: PrivyClient | null = null
 
@@ -29,6 +30,42 @@ export async function verifyAuth(req: NextRequest): Promise<string> {
 
   if (!walletAccount?.address) throw new Error('No wallet linked to account')
   return walletAccount.address.toLowerCase()
+}
+
+export interface AuthContext {
+  primaryWallet: string              // lowercased, the wallet stored in hl_balances
+  privyUserId: string
+  linkedWallets: LinkedEvmWallet[]   // ALL Ethereum wallets the user has linked
+  privyUser: unknown                 // raw user object for advanced use
+}
+
+/**
+ * Same as verifyAuth() but returns the full auth context including ALL
+ * linked Ethereum wallets (embedded + external). Deposits should accept
+ * any of these as the on-chain source address.
+ */
+export async function verifyAuthFull(req: NextRequest): Promise<AuthContext> {
+  const token = req.headers.get('authorization')?.replace('Bearer ', '')
+  if (!token) throw new Error('Missing authorization token')
+
+  const claims = await getPrivy().verifyAuthToken(token)
+  const user = await getPrivy().getUser(claims.userId)
+
+  const linkedWallets = getLinkedEvmWallets(user)
+  if (linkedWallets.length === 0) {
+    throw new Error('No Ethereum wallet on Privy account')
+  }
+
+  // Primary = first ethereum wallet in linkedAccounts (matches legacy verifyAuth semantics)
+  // so existing hl_balances rows keyed by this wallet keep working.
+  const primaryWallet = linkedWallets[0].address
+
+  return {
+    primaryWallet,
+    privyUserId: claims.userId,
+    linkedWallets,
+    privyUser: user,
+  }
 }
 
 export function unauthorized(message = 'Unauthorized') {
