@@ -1314,6 +1314,24 @@ export default function HolyLiquid() {
                     onChange={(e) => setWithdrawTo(e.target.value)}
                   />
                 </div>
+                {(() => {
+                  const amt = Number(withdrawAmount) || 0
+                  const fee = Math.round(amt * 0.03 * 100) / 100
+                  const net = Math.round((amt - fee) * 100) / 100
+                  if (amt <= 0) return null
+                  return (
+                    <div className="withdraw-preview">
+                      <div className="wp-row">
+                        <span className="wp-label">You receive</span>
+                        <span className="wp-value wp-value--green">${net.toFixed(2)}</span>
+                      </div>
+                      <div className="wp-row">
+                        <span className="wp-label">Platform fee (3%)</span>
+                        <span className="wp-value">−${fee.toFixed(2)}</span>
+                      </div>
+                    </div>
+                  )
+                })()}
                 {balance !== null && (
                   <div className="modal-sub" style={{ textAlign: 'right' }}>
                     Available: <strong style={{ color: '#7df2a8' }}>${fmt(balance)}</strong>
