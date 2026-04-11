@@ -462,22 +462,20 @@ export default function HolyLiquid() {
   const posShare = totalPool > 0 ? (Number(round?.pos_pool ?? 0) / totalPool) * 100 : 50
   const negShare = 100 - posShare
   const crowdLean = posShare === negShare ? 'Balanced' : posShare > negShare ? 'Crowd leaning +PNL' : 'Crowd leaning −PNL'
-  const crowdBiasNote = posShare > 66
+  const baseCrowdBias = posShare > 66
     ? 'Crowd heavy +PNL · contrarian edge on −PNL'
     : negShare > 66
       ? 'Crowd heavy −PNL · contrarian edge on +PNL'
       : 'Balanced market pressure'
+  const crowdBiasNote = selectedSide === 'pos'
+    ? `You’re against ${Math.round(negShare)}%`
+    : selectedSide === 'neg'
+      ? `You’re against ${Math.round(posShare)}%`
+      : baseCrowdBias
   const recentSettled = recentRounds.filter(r => r.result === 'pos' || r.result === 'neg' || r.result === 'void')
   const lastSix = recentSettled.slice(0, 6)
   const posWins = lastSix.filter(r => r.result === 'pos').length
   const negWins = lastSix.filter(r => r.result === 'neg').length
-  const patternSignal = !lastSix.length
-    ? 'Pattern loading'
-    : Math.abs(posWins - negWins) <= 1
-      ? 'Market flipping'
-      : posWins > negWins
-        ? `+PNL won ${posWins}/${lastSix.length}`
-        : `−PNL won ${negWins}/${lastSix.length}`
   const streak = (() => {
     const first = recentSettled[0]?.result
     if (!first || first === 'void') return null
@@ -488,9 +486,31 @@ export default function HolyLiquid() {
     }
     return { side: first, len }
   })()
+  const patternSignal = !lastSix.length
+    ? 'Pattern loading'
+    : streak && streak.len >= 4
+      ? 'Contrarian chance building'
+    : Math.abs(posWins - negWins) <= 1
+      ? 'Market flipping'
+      : posWins > negWins
+        ? `+PNL won ${posWins}/${lastSix.length}`
+        : `−PNL won ${negWins}/${lastSix.length}`
   const lastSettledLabel = recentSettled[0]?.settled_at
     ? `${Math.max(0, Math.round((Date.now() - new Date(recentSettled[0].settled_at as string).getTime()) / 1000))}s ago`
     : 'live'
+  const payoutMultipleForRound = (r: HistoryRound) => {
+    const pool = Number(r.pos_pool ?? 0) + Number(r.neg_pool ?? 0)
+    const winnerPool = r.result === 'pos' ? Number(r.pos_pool ?? 0) : r.result === 'neg' ? Number(r.neg_pool ?? 0) : 0
+    if (r.result === 'void' || winnerPool <= 0) return null
+    return 1 + (pool * 0.95) / winnerPool
+  }
+  const latestSettle = recentSettled[0] ?? null
+  const latestMult = latestSettle ? payoutMultipleForRound(latestSettle) : null
+  const biggestRecentMult = recentSettled.reduce((mx, r) => {
+    const mult = payoutMultipleForRound(r)
+    return mult && mult > mx ? mult : mx
+  }, 0)
+  const proofLine = biggestRecentMult > 0 ? `Biggest recent payout ${biggestRecentMult.toFixed(2)}×` : 'Recent settles loading'
   const heroValue = `$${round ? Math.round(round.current_value).toLocaleString() : '---'}`
   const heroSize = heroFontSize(heroValue)
   const pnlText = `${pnlPos ? '+' : ''}$${Math.abs(round?.pnl_usd ?? 0).toFixed(2)}`
@@ -727,20 +747,33 @@ export default function HolyLiquid() {
             </span>
             <span className="settled-tag">Last settle {lastSettledLabel}</span>
           </div>
+          {latestSettle && (
+            <div className={`result-hit ${latestSettle.result === 'pos' ? 'pos' : latestSettle.result === 'neg' ? 'neg' : 'void'}`}>
+              <div className="rh-left">
+                <div className="rh-main">{latestSettle.result === 'pos' ? '+PNL WON' : latestSettle.result === 'neg' ? '−PNL WON' : 'VOID ROUND'}</div>
+                <div className="rh-sub">
+                  R{latestSettle.round_number} · Pool ${Math.round((Number(latestSettle.pos_pool ?? 0) + Number(latestSettle.neg_pool ?? 0))).toLocaleString()}
+                </div>
+              </div>
+              <div className="rh-chip">
+                {latestMult ? `${latestMult.toFixed(2)}× PAID` : 'VOID'}
+              </div>
+            </div>
+          )}
           <div className="history-pattern">{patternSignal}</div>
+          <div className="history-proof">{proofLine}</div>
           <div className="history-tape">
             {(recentRounds.length ? recentRounds : [{ round_number: 0, result: null, pnl_pct: null, settled_at: null }]).map((r, i) => {
               const result = r.result === 'void' ? 'VOID' : r.result === 'pos' ? '+PNL' : r.result === 'neg' ? '−PNL' : '—'
               const resultClass = r.result === 'void' ? 'void' : r.result === 'pos' ? 'pos' : r.result === 'neg' ? 'neg' : ''
               const pool = Number(r.pos_pool ?? 0) + Number(r.neg_pool ?? 0)
-              const winnerPool = r.result === 'pos' ? Number(r.pos_pool ?? 0) : r.result === 'neg' ? Number(r.neg_pool ?? 0) : 0
-              const mult = r.result === 'void' || winnerPool <= 0 ? null : 1 + (pool * 0.95) / winnerPool
+              const mult = payoutMultipleForRound(r)
               return (
                 <div className={`history-pill ${resultClass}`} key={`${r.round_number}-${i}`}>
                   <span className="hr-round">{r.round_number ? `R${r.round_number}` : 'Soon'}</span>
-                  <span className="hr-side">{result}</span>
+                  <span className="hr-side">{result} {mult ? `${mult.toFixed(2)}×` : ''}</span>
                   <span className="hr-meta">
-                    {mult ? `${mult.toFixed(2)}x` : r.pnl_pct !== null ? `${r.pnl_pct > 0 ? '+' : ''}${r.pnl_pct.toFixed(1)}%` : 'Pending'}
+                    {r.pnl_pct !== null ? `${r.pnl_pct > 0 ? '+' : ''}${r.pnl_pct.toFixed(1)}%` : 'Pending'}
                     {pool > 0 ? ` · $${Math.round(pool)}` : ''}
                   </span>
                 </div>
