@@ -10,7 +10,7 @@ import { encodeFunctionData, parseUnits } from 'viem'
 
 const PriceWaterChart = dynamic(() => import('@/components/game/PriceWaterChart'), { ssr: false })
 
-const CHIPS = [5, 10, 25, 50, 100]
+const CHIPS = [1, 2, 5, 10, 25, 50, 100]
 const MVP_ASSET_LABEL = 'ETH'
 const WELCOME_SEEN_KEY = 'hl:welcomeSeen:v1'
 const SPOTLIGHT_DONE_KEY = 'hl:spotlightDone:v1'
@@ -1030,11 +1030,22 @@ export default function HolyLiquid() {
                   </div>
                 ))}
                 <div className="chip" style={{ fontSize: 9 }} onClick={() => {
-                  if (!balance) return
                   playSfx('chip')
-                  setSelectedChip(Math.min(Math.floor(balance), 500))
+                  const raw = window.prompt('Enter bet amount (USD)')
+                  if (raw === null) return
+                  const n = Math.floor(Number(raw))
+                  if (!Number.isFinite(n) || n <= 0) {
+                    playSfx('invalid')
+                    return showToast('Enter a valid amount', '#ff7c98')
+                  }
+                  const capped = balance !== null ? Math.min(n, Math.floor(balance)) : n
+                  if (capped <= 0) {
+                    playSfx('invalid')
+                    return showToast('Insufficient balance', '#ff7c98')
+                  }
+                  setSelectedChip(capped)
                 }}>
-                  MAX
+                  CUSTOM
                 </div>
               </div>
             </div>

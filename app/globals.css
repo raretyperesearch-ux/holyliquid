@@ -263,7 +263,7 @@ html, body, #__next { width: 100%; min-height: 100%; }
 /* CHIPS ISLAND */
 .chips-isl { padding:10px 12px 11px;width:100%;border-radius:18px }
 .ci-lbl { font-size:8px;letter-spacing:.4em;color:rgba(255,255,255,.3);text-transform:uppercase;text-align:center;margin-bottom:10px }
-.chips-row { display:flex;gap:7px;justify-content:center }
+.chips-row { display:flex;gap:7px;justify-content:center;flex-wrap:wrap;row-gap:8px }
 .chip {
   width:46px;height:46px;border-radius:50%;
   background:linear-gradient(180deg,rgba(20,22,36,.94),rgba(8,10,20,.96));
