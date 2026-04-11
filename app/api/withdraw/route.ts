@@ -32,50 +32,35 @@ export async function POST(req: NextRequest) {
       return badRequest(`Insufficient available balance. Available: $${available.toFixed(2)}`)
     }
 
-    // ⚠️ AUDIT BEFORE PRODUCTION ⚠️
-    // The block below has two semantic issues worth a second pair of eyes
-    // before real-money traffic:
-    //
-    // 1. The `hl_decrease_locked(p_amount: 0)` call is a no-op placeholder
-    //    that ignores its own `deductError`. It reads like something that
-    //    was supposed to clear a lock but currently doesn't.
-    //
-    // 2. The balance update uses a non-atomic read-then-write pattern
-    //    (`bal.balance_usdc - amount`) which isn't concurrency-safe under
-    //    parallel withdraws. The `.gte('balance_usdc', amount)` guard
-    //    prevents negative balances but can still race with other mutators.
-    //    Prefer an atomic decrement RPC similar to `hl_credit_deposit`.
-    //
-    // Leaving intact so behavior doesn't change silently — flag for review.
-    const { error: deductError } = await sb.rpc('hl_decrease_locked', {
+    // Atomic decrement in DB function: avoids read-then-write races.
+    const { data: debitedBalance, error: updateError } = await sb.rpc('hl_withdraw_debit', {
       p_wallet: wallet,
-      p_amount: 0, // no locked amount to decrease — placeholder, see note above
+      p_amount: amount,
     })
-    void deductError // intentionally swallowed; see audit note above
 
-    // Direct balance deduction (see audit note re: atomicity)
-    const { error: updateError } = await sb
-      .from('hl_balances')
-      .update({
-        balance_usdc: Number(bal.balance_usdc) - amount,
-        updated_at: new Date().toISOString(),
-      })
-      .eq('wallet', wallet)
-      .gte('balance_usdc', amount) // guard condition
-
-    if (updateError) throw updateError
+    if (updateError || debitedBalance === null || debitedBalance === undefined) {
+      return badRequest('Insufficient available balance')
+    }
 
     // Send USDC on-chain
     let txHash: string
     try {
       txHash = await sendUsdc(to_wallet, amount)
-    } catch (e: any) {
-      // Refund if tx fails
-      await sb
-        .from('hl_balances')
-        .update({ balance_usdc: Number(bal.balance_usdc) })
-        .eq('wallet', wallet)
-      throw new Error(`On-chain transfer failed: ${e.message}`)
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : 'unknown_error'
+      // Refund by compensating increment so concurrent updates are preserved.
+      await sb.rpc('hl_withdraw_refund', {
+        p_wallet: wallet,
+        p_amount: amount,
+      })
+      await sb.from('hl_transactions').insert({
+        wallet,
+        type: 'withdraw',
+        amount,
+        tx_hash: null,
+        note: `withdrawal failed to ${to_wallet} (refunded): ${msg}`,
+      })
+      throw new Error(`On-chain transfer failed: ${msg}`)
     }
 
     // Record transaction
@@ -87,16 +72,17 @@ export async function POST(req: NextRequest) {
       note: `withdrawal to ${to_wallet}`,
     })
 
-    const newBalance = Number(bal.balance_usdc) - amount
+    const newBalance = Number(debitedBalance)
 
     return ok({
       tx_hash: txHash,
       amount,
       balance_usdc: newBalance,
     })
-  } catch (e: any) {
-    if (e.message?.includes('token') || e.message?.includes('wallet')) {
-      return unauthorized(e.message)
+  } catch (e: unknown) {
+    const msg = e instanceof Error ? e.message : String(e)
+    if (msg.includes('token') || msg.includes('wallet')) {
+      return unauthorized(msg)
     }
     return serverError(e)
   }
