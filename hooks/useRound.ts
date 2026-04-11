@@ -59,12 +59,9 @@ export function useRound(accessToken: string | null) {
           if (!prev || prev.id === incoming.id) return incoming
           const now = Date.now()
           const prevClosesAt = new Date(prev.closes_at).getTime()
-          const incomingClosesAt = new Date(incoming.closes_at).getTime()
           if (
             Number.isFinite(prevClosesAt) &&
-            Number.isFinite(incomingClosesAt) &&
-            now < prevClosesAt &&
-            incomingClosesAt > prevClosesAt
+            now < prevClosesAt + 1200
           ) {
             keepCurrent = true
             return prev

@@ -28,27 +28,34 @@ type RoundRow = {
 function selectDisplayRound(rounds: RoundRow[], nowMs: number): RoundRow | null {
   if (!rounds.length) return null
 
+  const DISPLAY_GRACE_MS = 3_000
   const withTimes = rounds
     .map(r => ({
       row: r,
-      opensAt: new Date(r.open_price_ts).getTime(),
+      bettingClosesAt: new Date(r.betting_closes_at).getTime(),
       closesAt: new Date(r.closes_at).getTime(),
     }))
-    .filter(r => Number.isFinite(r.opensAt) && Number.isFinite(r.closesAt))
+    .filter(r => Number.isFinite(r.closesAt))
 
-  const live = withTimes
-    .filter(r => r.opensAt <= nowMs && nowMs < r.closesAt)
-    .sort((a, b) => a.closesAt - b.closesAt || a.opensAt - b.opensAt)
-  if (live.length) return live[0].row
+  // Keep the round with the nearest closing timestamp that is still ongoing.
+  // This prevents pre-created future rows from replacing the visible round early.
+  const active = withTimes
+    .filter(r => nowMs < r.closesAt)
+    .sort((a, b) => a.closesAt - b.closesAt)
+  if (active.length) return active[0].row
+
+  // Short post-close grace to keep settled display stable at zero before handoff.
+  const justClosed = withTimes
+    .filter(r => nowMs >= r.closesAt && nowMs - r.closesAt <= DISPLAY_GRACE_MS)
+    .sort((a, b) => b.closesAt - a.closesAt)
+  if (justClosed.length) return justClosed[0].row
 
   const upcoming = withTimes
-    .filter(r => r.opensAt > nowMs)
-    .sort((a, b) => a.opensAt - b.opensAt)
+    .filter(r => Number.isFinite(r.bettingClosesAt) && r.bettingClosesAt > nowMs)
+    .sort((a, b) => a.bettingClosesAt - b.bettingClosesAt)
   if (upcoming.length) return upcoming[0].row
 
-  const recentPast = withTimes
-    .sort((a, b) => b.closesAt - a.closesAt)
-  return recentPast[0]?.row ?? null
+  return withTimes.sort((a, b) => b.closesAt - a.closesAt)[0]?.row ?? null
 }
 
 export async function GET(req: NextRequest) {
