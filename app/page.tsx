@@ -120,17 +120,16 @@ export default function HolyLiquid() {
 
   useEffect(() => { if (accessToken) fetchBalance() }, [accessToken, fetchBalance])
 
-  // Track price history per round. Keyed on round.id so each rollover starts fresh.
-  const lastRoundRef = useRef<string | null>(null)
+  // Keep ETH trace continuous across round boundaries for a single live-market feel.
   useEffect(() => {
-    if (!round?.current_price || !round?.pair || !round?.id) return
-    if (round.id !== lastRoundRef.current) {
-      lastRoundRef.current = round.id
-      setPriceHistory([round.current_price])
-    } else {
-      setPriceHistory(prev => [...prev, round.current_price].slice(-120))
-    }
-  }, [round?.current_price, round?.id, round?.pair])
+    if (!round?.current_price || !round?.pair) return
+    setPriceHistory(prev => {
+      if (!prev.length) return [round.current_price]
+      const last = prev[prev.length - 1]
+      if (Math.abs(last - round.current_price) < 1e-9) return prev
+      return [...prev, round.current_price].slice(-360)
+    })
+  }, [round?.current_price, round?.pair])
 
   useEffect(() => {
     if (!round) return
@@ -429,7 +428,7 @@ export default function HolyLiquid() {
   function fmtPrice(n: number | undefined | null): string {
     if (n === undefined || n === null || !Number.isFinite(n)) return '---'
     const abs = Math.abs(n)
-    const digits = abs >= 1000 ? 0 : abs >= 10 ? 2 : 4
+    const digits = abs >= 1 ? 2 : 4
     return '$' + n.toLocaleString('en-US', {
       minimumFractionDigits: digits,
       maximumFractionDigits: digits,

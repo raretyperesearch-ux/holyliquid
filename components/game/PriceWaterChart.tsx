@@ -398,7 +398,7 @@ export default function PriceWaterChart({ priceHistory, pnlPos }: Props) {
       const markerY = s[Math.max(0, W - 1)]
       const livePrice = prices.length ? prices[prices.length - 1] : null
       const livePriceTxt = livePrice !== null && Number.isFinite(livePrice)
-        ? '$' + livePrice.toLocaleString('en-US', { maximumFractionDigits: livePrice > 1000 ? 0 : 2 })
+        ? '$' + livePrice.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
         : '--'
       ctx2.beginPath()
       ctx2.arc(markerX, markerY, 2.7, 0, Math.PI * 2)
