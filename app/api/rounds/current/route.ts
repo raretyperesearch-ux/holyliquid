@@ -1,5 +1,9 @@
 import { NextRequest } from 'next/server'
 import { ok, serverError } from '@/lib/auth'
+import { unstable_noStore as noStore } from 'next/cache'
+
+export const dynamic = 'force-dynamic'
+export const revalidate = 0
 
 const ORACLE_URL = process.env.ORACLE_SERVICE_URL || 'http://localhost:8000'
 const MVP_PAIR = process.env.HL_MVP_PAIR || 'ETH/USD'
@@ -60,6 +64,7 @@ function selectDisplayRound(rounds: RoundRow[], nowMs: number): RoundRow | null 
 
 export async function GET(req: NextRequest) {
   try {
+    noStore()
     // Get wallet from optional auth header (not required for viewing)
     let wallet: string | null = null
     try {
@@ -86,7 +91,11 @@ export async function GET(req: NextRequest) {
     // Get current price from oracle
     let currentPrice = round.open_price
     try {
-      const res = await fetch(`${ORACLE_URL}/prices`, { signal: AbortSignal.timeout(2000) })
+      const res = await fetch(`${ORACLE_URL}/prices`, {
+        signal: AbortSignal.timeout(2000),
+        cache: 'no-store',
+        next: { revalidate: 0 },
+      })
       if (res.ok) {
         const prices = await res.json() as OraclePriceMap
         currentPrice = prices[round.pair]?.price ?? round.open_price

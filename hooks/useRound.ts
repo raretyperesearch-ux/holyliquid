@@ -49,7 +49,10 @@ export function useRound(accessToken: string | null) {
       const headers: HeadersInit = {}
       if (accessToken) headers['Authorization'] = `Bearer ${accessToken}`
 
-      const res = await fetch('/api/rounds/current', { headers })
+      const res = await fetch('/api/rounds/current', {
+        headers,
+        cache: 'no-store',
+      })
       if (!res.ok) return
       const json = await res.json()
       if (json.data?.round) {
