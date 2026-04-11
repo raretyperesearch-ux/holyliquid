@@ -20,6 +20,8 @@ type HistoryRound = {
   result: 'pos' | 'neg' | 'void' | null
   pnl_pct: number | null
   settled_at: string | null
+  pos_pool?: number
+  neg_pool?: number
 }
 
 export default function HolyLiquid() {
@@ -140,14 +142,14 @@ export default function HolyLiquid() {
     gain.connect(ctx.destination)
 
     const presets = {
-      chip:      { freq: 620, end: 700, dur: 0.06, vol: 0.03, type: 'triangle' as OscillatorType },
-      side:      { freq: 420, end: 510, dur: 0.08, vol: 0.04, type: 'sine' as OscillatorType },
-      confirm:   { freq: 360, end: 660, dur: 0.12, vol: 0.05, type: 'triangle' as OscillatorType },
-      invalid:   { freq: 220, end: 170, dur: 0.09, vol: 0.045, type: 'sawtooth' as OscillatorType },
-      modalOpen: { freq: 520, end: 430, dur: 0.08, vol: 0.035, type: 'sine' as OscillatorType },
-      modalClose:{ freq: 390, end: 290, dur: 0.07, vol: 0.03, type: 'sine' as OscillatorType },
-      win:       { freq: 520, end: 820, dur: 0.16, vol: 0.055, type: 'triangle' as OscillatorType },
-      loss:      { freq: 320, end: 180, dur: 0.16, vol: 0.05, type: 'square' as OscillatorType },
+      chip:      { freq: 620, end: 700, dur: 0.06, vol: 0.05, type: 'triangle' as OscillatorType },
+      side:      { freq: 420, end: 510, dur: 0.08, vol: 0.055, type: 'sine' as OscillatorType },
+      confirm:   { freq: 360, end: 660, dur: 0.12, vol: 0.07, type: 'triangle' as OscillatorType },
+      invalid:   { freq: 220, end: 170, dur: 0.09, vol: 0.06, type: 'sawtooth' as OscillatorType },
+      modalOpen: { freq: 520, end: 430, dur: 0.08, vol: 0.05, type: 'sine' as OscillatorType },
+      modalClose:{ freq: 390, end: 290, dur: 0.07, vol: 0.045, type: 'sine' as OscillatorType },
+      win:       { freq: 520, end: 820, dur: 0.16, vol: 0.075, type: 'triangle' as OscillatorType },
+      loss:      { freq: 320, end: 180, dur: 0.16, vol: 0.065, type: 'square' as OscillatorType },
     }[kind]
 
     osc.type = presets.type
@@ -659,20 +661,24 @@ export default function HolyLiquid() {
           </>
         )}
 
-        <div className="isl activity-isl">
-          <div className="activity-hdr">
+        <div className="isl history-isl">
+          <div className="history-hdr">
             <span>Market Activity</span>
-            <span className="activity-dot">Live</span>
+            <span className="history-dot">Recent Settles</span>
           </div>
-          <div className="activity-row">
+          <div className="history-tape">
             {(recentRounds.length ? recentRounds : [{ round_number: 0, result: null, pnl_pct: null, settled_at: null }]).map((r, i) => {
               const result = r.result === 'void' ? 'VOID' : r.result === 'pos' ? '+PNL' : r.result === 'neg' ? '−PNL' : '—'
               const resultClass = r.result === 'void' ? 'void' : r.result === 'pos' ? 'pos' : r.result === 'neg' ? 'neg' : ''
+              const pool = Number(r.pos_pool ?? 0) + Number(r.neg_pool ?? 0)
               return (
-                <div className={`activity-pill ${resultClass}`} key={`${r.round_number}-${i}`}>
-                  <span className="ar-round">{r.round_number ? `R${r.round_number}` : 'Soon'}</span>
-                  <span className="ar-side">{result}</span>
-                  <span className="ar-pct">{r.pnl_pct !== null ? `${r.pnl_pct > 0 ? '+' : ''}${r.pnl_pct.toFixed(1)}%` : 'Pending'}</span>
+                <div className={`history-pill ${resultClass}`} key={`${r.round_number}-${i}`}>
+                  <span className="hr-round">{r.round_number ? `R${r.round_number}` : 'Soon'}</span>
+                  <span className="hr-side">{result}</span>
+                  <span className="hr-meta">
+                    {r.pnl_pct !== null ? `${r.pnl_pct > 0 ? '+' : ''}${r.pnl_pct.toFixed(1)}%` : 'Pending'}
+                    {pool > 0 ? ` · $${Math.round(pool)}` : ''}
+                  </span>
                 </div>
               )
             })}
