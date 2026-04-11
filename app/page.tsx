@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useRef, useCallback } from 'react'
 import dynamic from 'next/dynamic'
+import { createPortal } from 'react-dom'
 import { usePrivy } from '@privy-io/react-auth'
 import { useRound } from '@/hooks/useRound'
 
@@ -37,6 +38,7 @@ export default function HolyLiquid() {
   const [withdrawTo, setWithdrawTo] = useState('')
   const [modalBusy, setModalBusy] = useState(false)
   const [soundOn, setSoundOn] = useState(true)
+  const [domReady, setDomReady] = useState(false)
 
   // Settle flash (shown briefly when a round result lands)
   const [settleFlash, setSettleFlash] = useState<'win' | 'loss' | null>(null)
@@ -49,6 +51,10 @@ export default function HolyLiquid() {
       setAccessToken(null)
     }
   }, [authenticated, getAccessToken])
+
+  useEffect(() => {
+    setDomReady(true)
+  }, [])
 
   const { round, myBet, refetch } = useRound(accessToken)
 
@@ -542,7 +548,7 @@ export default function HolyLiquid() {
       </div>
 
       {/* ── DEPOSIT / WITHDRAW MODAL ── */}
-      {modal && (
+      {modal && domReady && createPortal(
         <div className="modal-backdrop" onClick={closeModal}>
           <div className="modal-card" onClick={(e) => e.stopPropagation()}>
             {modal === 'deposit' && (
@@ -633,7 +639,7 @@ export default function HolyLiquid() {
             )}
           </div>
         </div>
-      )}
+      , document.body)}
 
       {/* TOAST */}
       {toast && (
