@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useRef, useCallback } from 'react'
 import dynamic from 'next/dynamic'
+import { createPortal } from 'react-dom'
 import { usePrivy } from '@privy-io/react-auth'
 import { useRound } from '@/hooks/useRound'
 
@@ -14,6 +15,12 @@ function fmt(n: number) {
 }
 
 type ModalKind = null | 'deposit' | 'withdraw'
+type HistoryRound = {
+  round_number: number
+  result: 'pos' | 'neg' | 'void' | null
+  pnl_pct: number | null
+  settled_at: string | null
+}
 
 export default function HolyLiquid() {
   const { ready, authenticated, login, getAccessToken, user } = usePrivy()
@@ -36,7 +43,9 @@ export default function HolyLiquid() {
   const [withdrawAmount, setWithdrawAmount] = useState('')
   const [withdrawTo, setWithdrawTo] = useState('')
   const [modalBusy, setModalBusy] = useState(false)
-  const [soundOn, setSoundOn] = useState(true)
+  const [domReady, setDomReady] = useState(false)
+  const [recentRounds, setRecentRounds] = useState<HistoryRound[]>([])
+  const audioCtxRef = useRef<AudioContext | null>(null)
 
   // Settle flash (shown briefly when a round result lands)
   const [settleFlash, setSettleFlash] = useState<'win' | 'loss' | null>(null)
@@ -49,6 +58,22 @@ export default function HolyLiquid() {
       setAccessToken(null)
     }
   }, [authenticated, getAccessToken])
+
+  useEffect(() => {
+    setDomReady(true)
+  }, [])
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    const raw = window.localStorage.getItem('hl:selectedChip')
+    const parsed = raw ? Number(raw) : NaN
+    if (CHIPS.includes(parsed)) setSelectedChip(parsed)
+  }, [])
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    window.localStorage.setItem('hl:selectedChip', String(selectedChip))
+  }, [selectedChip])
 
   const { round, myBet, refetch } = useRound(accessToken)
 
@@ -96,10 +121,61 @@ export default function HolyLiquid() {
     toastTimer.current = setTimeout(() => setToast(null), 3000)
   }
 
+  const ensureAudio = useCallback(() => {
+    if (typeof window === 'undefined') return null
+    const Ctx = window.AudioContext || (window as typeof window & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext
+    if (!Ctx) return null
+    if (!audioCtxRef.current) audioCtxRef.current = new Ctx()
+    if (audioCtxRef.current.state === 'suspended') audioCtxRef.current.resume().catch(() => {})
+    return audioCtxRef.current
+  }, [])
+
+  const playSfx = useCallback((kind: 'chip' | 'side' | 'confirm' | 'invalid' | 'modalOpen' | 'modalClose' | 'win' | 'loss') => {
+    const ctx = ensureAudio()
+    if (!ctx) return
+    const osc = ctx.createOscillator()
+    const gain = ctx.createGain()
+    const now = ctx.currentTime
+    osc.connect(gain)
+    gain.connect(ctx.destination)
+
+    const presets = {
+      chip:      { freq: 620, end: 700, dur: 0.06, vol: 0.03, type: 'triangle' as OscillatorType },
+      side:      { freq: 420, end: 510, dur: 0.08, vol: 0.04, type: 'sine' as OscillatorType },
+      confirm:   { freq: 360, end: 660, dur: 0.12, vol: 0.05, type: 'triangle' as OscillatorType },
+      invalid:   { freq: 220, end: 170, dur: 0.09, vol: 0.045, type: 'sawtooth' as OscillatorType },
+      modalOpen: { freq: 520, end: 430, dur: 0.08, vol: 0.035, type: 'sine' as OscillatorType },
+      modalClose:{ freq: 390, end: 290, dur: 0.07, vol: 0.03, type: 'sine' as OscillatorType },
+      win:       { freq: 520, end: 820, dur: 0.16, vol: 0.055, type: 'triangle' as OscillatorType },
+      loss:      { freq: 320, end: 180, dur: 0.16, vol: 0.05, type: 'square' as OscillatorType },
+    }[kind]
+
+    osc.type = presets.type
+    osc.frequency.setValueAtTime(presets.freq, now)
+    osc.frequency.exponentialRampToValueAtTime(Math.max(80, presets.end), now + presets.dur)
+    gain.gain.setValueAtTime(0.0001, now)
+    gain.gain.exponentialRampToValueAtTime(presets.vol, now + 0.012)
+    gain.gain.exponentialRampToValueAtTime(0.0001, now + presets.dur)
+    osc.start(now)
+    osc.stop(now + presets.dur + 0.01)
+  }, [ensureAudio])
+
+  useEffect(() => {
+    const unlock = () => { ensureAudio() }
+    window.addEventListener('pointerdown', unlock, { passive: true })
+    window.addEventListener('keydown', unlock)
+    return () => {
+      window.removeEventListener('pointerdown', unlock)
+      window.removeEventListener('keydown', unlock)
+    }
+  }, [ensureAudio])
+
   async function placeBet() {
-    if (!accessToken || !round || !selectedSide) return
-    if (countdown.lock <= 0) return showToast('Betting is closed', '#ff7c98')
-    if (balance !== null && selectedChip > balance) return showToast('Insufficient balance', '#ff7c98')
+    if (!accessToken || !round) return
+    if (!selectedSide) { playSfx('invalid'); return showToast('Select a side first', '#ff7c98') }
+    if (countdown.lock <= 0) { playSfx('invalid'); return showToast('Betting is closed', '#ff7c98') }
+    if (balance !== null && selectedChip > balance) { playSfx('invalid'); return showToast('Insufficient balance', '#ff7c98') }
+    playSfx('confirm')
     setBetting(true)
     try {
       const res = await fetch('/api/bet', {
@@ -117,9 +193,10 @@ export default function HolyLiquid() {
         setSelectedSide(null)
         refetch()
       } else {
+        playSfx('invalid')
         showToast(json.error || 'Bet failed', '#ff7c98')
       }
-    } catch { showToast('Network error', '#ff7c98') }
+    } catch { playSfx('invalid'); showToast('Network error', '#ff7c98') }
     finally { setBetting(false) }
   }
 
@@ -141,11 +218,13 @@ export default function HolyLiquid() {
   }, [])
 
   function openDeposit() {
+    playSfx('modalOpen')
     setDepositTxHash('')
     setDepositAmount('')
     setModal('deposit')
   }
   function openWithdraw() {
+    playSfx('modalOpen')
     setWithdrawAmount('')
     // Prefill destination with the user's own wallet if available
     const w = user?.wallet?.address
@@ -154,6 +233,7 @@ export default function HolyLiquid() {
   }
   function closeModal() {
     if (modalBusy) return
+    playSfx('modalClose')
     setModal(null)
   }
 
@@ -175,14 +255,16 @@ export default function HolyLiquid() {
       })
       const json = await res.json()
       if (json.success) {
+        playSfx('confirm')
         showToast(`Deposited $${fmt(json.data.amount_credited)}`, '#7df2a8')
         // Refetch balance to get consistent available_usdc semantics
         fetchBalance()
         setModal(null)
       } else {
+        playSfx('invalid')
         showToast(json.error || 'Deposit failed', '#ff7c98')
       }
-    } catch { showToast('Network error', '#ff7c98') }
+    } catch { playSfx('invalid'); showToast('Network error', '#ff7c98') }
     finally { setModalBusy(false) }
   }
 
@@ -207,14 +289,16 @@ export default function HolyLiquid() {
       })
       const json = await res.json()
       if (json.success) {
+        playSfx('confirm')
         showToast(`Withdrew $${fmt(json.data.amount)}`, '#7df2a8')
         // Refetch balance to get consistent available_usdc semantics
         fetchBalance()
         setModal(null)
       } else {
+        playSfx('invalid')
         showToast(json.error || 'Withdraw failed', '#ff7c98')
       }
-    } catch { showToast('Network error', '#ff7c98') }
+    } catch { playSfx('invalid'); showToast('Network error', '#ff7c98') }
     finally { setModalBusy(false) }
   }
 
@@ -224,10 +308,24 @@ export default function HolyLiquid() {
     if (lastSettledIdRef.current === round.id) return
     lastSettledIdRef.current = round.id
     let t: ReturnType<typeof setTimeout> | undefined
-    if (myBet?.won === true)  { setSettleFlash('win');  t = setTimeout(() => setSettleFlash(null), 1300) }
-    if (myBet?.won === false) { setSettleFlash('loss'); t = setTimeout(() => setSettleFlash(null), 1300) }
+    if (myBet?.won === true)  { playSfx('win'); setSettleFlash('win');  t = setTimeout(() => setSettleFlash(null), 1300) }
+    if (myBet?.won === false) { playSfx('loss'); setSettleFlash('loss'); t = setTimeout(() => setSettleFlash(null), 1300) }
     return () => { if (t) clearTimeout(t) }
-  }, [round?.id, round?.status, myBet?.won])
+  }, [round?.id, round?.status, myBet?.won, playSfx])
+
+  useEffect(() => {
+    let cancelled = false
+    async function fetchRecent() {
+      try {
+        const res = await fetch('/api/rounds/history?limit=6')
+        const json = await res.json()
+        if (!cancelled) setRecentRounds(json?.data?.rounds ?? [])
+      } catch {}
+    }
+    fetchRecent()
+    const id = setInterval(fetchRecent, 12_000)
+    return () => { cancelled = true; clearInterval(id) }
+  }, [])
 
   const isLocked = !round || round.status !== 'open' || countdown.lock <= 0
   const pnlPos   = (round?.pnl_usd ?? 0) >= 0
@@ -339,6 +437,11 @@ export default function HolyLiquid() {
       ? 'Live payout unavailable'
       : `Est. payout $${fmt(estimatedPayout)}`
 
+  const totalPool = Number(round?.pos_pool ?? 0) + Number(round?.neg_pool ?? 0)
+  const posShare = totalPool > 0 ? (Number(round?.pos_pool ?? 0) / totalPool) * 100 : 50
+  const negShare = 100 - posShare
+  const crowdLean = posShare === negShare ? 'Balanced' : posShare > negShare ? 'Crowd leaning +PNL' : 'Crowd leaning −PNL'
+
   return (
     <div className="hl-root">
 
@@ -394,14 +497,7 @@ export default function HolyLiquid() {
               <button className="acct-btn withdraw" onClick={openWithdraw}>Cash Out</button>
             </div>
           )}
-          <button
-            className={`isl sound-pill${soundOn ? ' on' : ''}`}
-            type="button"
-            onClick={() => setSoundOn((v) => !v)}
-            aria-label={soundOn ? 'Mute sound effects' : 'Enable sound effects'}
-          >
-            {soundOn ? 'Sound On' : 'Muted'}
-          </button>
+          <div className="hdr-util-dot" aria-hidden />
         </div>
 
         <div className="stats-row">
@@ -465,6 +561,20 @@ export default function HolyLiquid() {
             </div>
           </div>
         </div>
+        <div className="isl split-isl">
+          <div className="split-head">
+            <span>Market Split</span>
+            <span>{crowdLean}</span>
+          </div>
+          <div className="split-track">
+            <div className="split-pos" style={{ width: `${Math.max(0, posShare)}%` }} />
+            <div className="split-neg" style={{ width: `${Math.max(0, negShare)}%` }} />
+          </div>
+          <div className="split-meta">
+            <span>+PNL {posShare.toFixed(0)}%</span>
+            <span>−PNL {negShare.toFixed(0)}%</span>
+          </div>
+        </div>
 
         {/* boat-zone spacer — keeps flex layout spacing */}
         <div className="boat-zone" />
@@ -503,11 +613,15 @@ export default function HolyLiquid() {
               <div className="ci-lbl">1 · Select Amount</div>
               <div className="chips-row">
                 {CHIPS.map(c => (
-                  <div key={c} className={`chip${selectedChip === c ? ' sel' : ''}`} onClick={() => setSelectedChip(c)}>
+                  <div key={c} className={`chip${selectedChip === c ? ' sel' : ''}`} onClick={() => { playSfx('chip'); setSelectedChip(c) }}>
                     ${c}
                   </div>
                 ))}
-                <div className="chip" style={{ fontSize: 9 }} onClick={() => balance && setSelectedChip(Math.min(Math.floor(balance), 500))}>
+                <div className="chip" style={{ fontSize: 9 }} onClick={() => {
+                  if (!balance) return
+                  playSfx('chip')
+                  setSelectedChip(Math.min(Math.floor(balance), 500))
+                }}>
                   MAX
                 </div>
               </div>
@@ -517,20 +631,26 @@ export default function HolyLiquid() {
             <div className="btns-row">
               <button
                 className={`sb sb-pos${selectedSide === 'pos' ? ' on' : ''}${isLocked ? ' sb-locked' : ''}`}
-                disabled={isLocked}
-                onClick={() => setSelectedSide(prev => prev === 'pos' ? null : 'pos')}
+                onClick={() => {
+                  if (isLocked) return playSfx('invalid')
+                  playSfx('side')
+                  setSelectedSide(prev => prev === 'pos' ? null : 'pos')
+                }}
               >+PNL</button>
               <button
                 className={`sb sb-neg${selectedSide === 'neg' ? ' on' : ''}${isLocked ? ' sb-locked' : ''}`}
-                disabled={isLocked}
-                onClick={() => setSelectedSide(prev => prev === 'neg' ? null : 'neg')}
+                onClick={() => {
+                  if (isLocked) return playSfx('invalid')
+                  playSfx('side')
+                  setSelectedSide(prev => prev === 'neg' ? null : 'neg')
+                }}
               >−PNL</button>
             </div>
 
             {/* ISLAND 6: Confirm */}
             <button
               className={`cfm-isl${selectedSide && !isLocked ? ' rdy' : ''}`}
-              disabled={!selectedSide || isLocked || betting}
+              disabled={betting}
               onClick={placeBet}
             >
               <span className="cfm-main">{cfmText}</span>
@@ -538,11 +658,31 @@ export default function HolyLiquid() {
             </button>
           </>
         )}
+
+        <div className="isl activity-isl">
+          <div className="activity-hdr">
+            <span>Market Activity</span>
+            <span className="activity-dot">Live</span>
+          </div>
+          <div className="activity-row">
+            {(recentRounds.length ? recentRounds : [{ round_number: 0, result: null, pnl_pct: null, settled_at: null }]).map((r, i) => {
+              const result = r.result === 'void' ? 'VOID' : r.result === 'pos' ? '+PNL' : r.result === 'neg' ? '−PNL' : '—'
+              const resultClass = r.result === 'void' ? 'void' : r.result === 'pos' ? 'pos' : r.result === 'neg' ? 'neg' : ''
+              return (
+                <div className={`activity-pill ${resultClass}`} key={`${r.round_number}-${i}`}>
+                  <span className="ar-round">{r.round_number ? `R${r.round_number}` : 'Soon'}</span>
+                  <span className="ar-side">{result}</span>
+                  <span className="ar-pct">{r.pnl_pct !== null ? `${r.pnl_pct > 0 ? '+' : ''}${r.pnl_pct.toFixed(1)}%` : 'Pending'}</span>
+                </div>
+              )
+            })}
+          </div>
+        </div>
         </div>
       </div>
 
       {/* ── DEPOSIT / WITHDRAW MODAL ── */}
-      {modal && (
+      {modal && domReady && createPortal(
         <div className="modal-backdrop" onClick={closeModal}>
           <div className="modal-card" onClick={(e) => e.stopPropagation()}>
             {modal === 'deposit' && (
@@ -633,7 +773,7 @@ export default function HolyLiquid() {
             )}
           </div>
         </div>
-      )}
+      , document.body)}
 
       {/* TOAST */}
       {toast && (
