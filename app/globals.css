@@ -1122,3 +1122,28 @@ html, body, #__next { width: 100%; min-height: 100%; }
     margin-top: 3px;
   }
 }
+
+/* ── SOUND TOGGLE ─────────────────────────────────────────── */
+.sound-toggle {
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  color: rgba(255, 255, 255, 0.7);
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  padding: 0;
+  flex-shrink: 0;
+}
+.sound-toggle:hover {
+  background: rgba(255, 255, 255, 0.12);
+  color: rgba(255, 255, 255, 0.95);
+  border-color: rgba(255, 255, 255, 0.2);
+}
+.sound-toggle:active {
+  transform: scale(0.92);
+}

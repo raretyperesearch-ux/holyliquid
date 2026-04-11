@@ -6,6 +6,8 @@ import { createPortal } from 'react-dom'
 import { usePrivy } from '@privy-io/react-auth'
 import { useRound, type LastResult } from '@/hooks/useRound'
 import { LiveTicker } from './components/LiveTicker'
+import { SoundToggle } from './components/SoundToggle'
+import { sounds } from '../lib/sounds'
 import { encodeFunctionData, parseUnits } from 'viem'
 
 const PriceWaterChart = dynamic(() => import('@/components/game/PriceWaterChart'), { ssr: false })
@@ -268,14 +270,17 @@ export default function HolyLiquid() {
   const { round, myBet, refetch, lastResult, clearLastResult } = useRound(accessToken, {
     onResult: useCallback((result: LastResult) => {
       fetchBalanceRef.current()
-      // Trigger PNL card juice based on the round's position outcome.
+      // Trigger PNL card juice + casino sound based on the round's position outcome.
       // result_label carries the raw backend outcome (+PNL/-PNL/LIQUIDATED).
       if (result.result_label === '+PNL') {
         setPnlJuice('win')
+        sounds.win()
       } else if (result.result_label === '-PNL') {
         setPnlJuice('loss')
+        sounds.loss()
       } else if (result.result_label === 'LIQUIDATED') {
         setPnlJuice('liq')
+        sounds.liq()
       }
       setTimeout(() => setPnlJuice(null), 1500)
     }, []),
@@ -334,6 +339,7 @@ export default function HolyLiquid() {
   }, [])
 
   const playSfx = useCallback((kind: 'chip' | 'side' | 'confirm' | 'invalid' | 'modalOpen' | 'modalClose' | 'win' | 'loss') => {
+    if (sounds.isMuted()) return
     const ctx = ensureAudio()
     if (!ctx) return
     const osc = ctx.createOscillator()
@@ -379,6 +385,7 @@ export default function HolyLiquid() {
     if (!accessToken || !round) return
     if (countdown.lock <= 0) { playSfx('invalid'); showToast('Betting is closed', '#ff7c98'); return }
     if (balance !== null && chip > balance) { playSfx('invalid'); showToast('Insufficient balance', '#ff7c98'); return }
+    sounds.bet()
     playSfx('confirm')
     setBetting(true)
     try {
@@ -415,6 +422,7 @@ export default function HolyLiquid() {
 
   // One-click rebet of the last successful bet on the current open round.
   const runItBack = useCallback(() => {
+    sounds.click()
     const last = lastBetRef.current
     if (!last) return
     if (!round || round.status !== 'open') {
@@ -906,18 +914,19 @@ export default function HolyLiquid() {
               <span className="tag-in">in 30s</span>
             </div>
           </div>
+          <SoundToggle />
           {!ready ? (
             <div className="isl account-isl skeleton-account" />
           ) : !authenticated ? (
-            <button className="isl connect-pill" ref={(el) => { accountGuideRef.current = el }} onClick={login}>Connect</button>
+            <button className="isl connect-pill" ref={(el) => { accountGuideRef.current = el }} onClick={() => { sounds.click(); login() }}>Connect</button>
           ) : (
             <div className="isl account-isl account-center" ref={(el) => { accountGuideRef.current = el }}>
-              <button className="acct-btn deposit" onClick={openDeposit}>Deposit</button>
+              <button className="acct-btn deposit" onClick={() => { sounds.click(); openDeposit() }}>Deposit</button>
               <div className="acct-bal">
                 <div className="bl">Available</div>
                 <div className="bv">{balance !== null ? `$${fmt(balance)}` : '---'}</div>
               </div>
-              <button className="acct-btn withdraw" onClick={openWithdraw}>Cash Out</button>
+              <button className="acct-btn withdraw" onClick={() => { sounds.click(); openWithdraw() }}>Cash Out</button>
             </div>
           )}
           <div className="hdr-util-dot" aria-hidden />
