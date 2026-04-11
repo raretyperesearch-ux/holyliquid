@@ -5,6 +5,7 @@ import dynamic from 'next/dynamic'
 import { createPortal } from 'react-dom'
 import { usePrivy } from '@privy-io/react-auth'
 import { useRound } from '@/hooks/useRound'
+import { encodeFunctionData, parseUnits } from 'viem'
 
 const PriceWaterChart = dynamic(() => import('@/components/game/PriceWaterChart'), { ssr: false })
 
@@ -70,9 +71,11 @@ export default function HolyLiquid() {
   // Deposit / withdraw modal state
   const [modal, setModal] = useState<ModalKind>(null)
   const [treasuryWallet, setTreasuryWallet] = useState<string | null>(null)
+  const [depositTokenContract, setDepositTokenContract] = useState<string | null>(null)
   const [treasuryLoaded, setTreasuryLoaded] = useState(false)
   const [depositTxHash, setDepositTxHash] = useState('')
   const [depositAmount, setDepositAmount] = useState('')
+  const [showManualDeposit, setShowManualDeposit] = useState(false)
   const [withdrawAmount, setWithdrawAmount] = useState('')
   const [withdrawTo, setWithdrawTo] = useState('')
   const [modalBusy, setModalBusy] = useState(false)
@@ -281,6 +284,7 @@ export default function HolyLiquid() {
       .then(j => {
         if (cancelled) return
         setTreasuryWallet(j?.data?.treasury_wallet ?? null)
+        setDepositTokenContract(j?.data?.token_contract ?? null)
         setTreasuryLoaded(true)
       })
       .catch(() => {
@@ -294,6 +298,7 @@ export default function HolyLiquid() {
     playSfx('modalOpen')
     setDepositTxHash('')
     setDepositAmount('')
+    setShowManualDeposit(false)
     setModal('deposit')
   }
   function openWithdraw() {
@@ -353,6 +358,20 @@ export default function HolyLiquid() {
     return () => window.removeEventListener('resize', updateRect)
   }, [getStepTarget, modal, showWelcome, spotlightStep, spotlightSteps])
 
+  async function creditDeposit(txHash: string, amt: number) {
+    if (!accessToken) return { ok: false as const, error: 'Missing auth' }
+    const res = await fetch('/api/deposit', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${accessToken}` },
+      body: JSON.stringify({ tx_hash: txHash.trim(), amount: amt }),
+    })
+    const json = await res.json()
+    if (!json.success) {
+      return { ok: false as const, error: json.error || 'Deposit failed' }
+    }
+    return { ok: true as const, data: json.data as { amount_credited: number } }
+  }
+
   async function submitDeposit() {
     if (!accessToken) return
     const amt = Number(depositAmount)
@@ -364,24 +383,80 @@ export default function HolyLiquid() {
     }
     setModalBusy(true)
     try {
-      const res = await fetch('/api/deposit', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${accessToken}` },
-        body: JSON.stringify({ tx_hash: depositTxHash.trim(), amount: amt }),
-      })
-      const json = await res.json()
-      if (json.success) {
+      const credited = await creditDeposit(depositTxHash, amt)
+      if (credited.ok) {
         playSfx('confirm')
-        showToast(`Deposited $${fmt(json.data.amount_credited)}`, '#7df2a8')
+        showToast(`Deposited $${fmt(credited.data.amount_credited)}`, '#7df2a8')
         // Refetch balance to get consistent available_usdc semantics
         fetchBalance()
         setModal(null)
       } else {
         playSfx('invalid')
-        showToast(json.error || 'Deposit failed', '#ff7c98')
+        showToast(credited.error, '#ff7c98')
       }
     } catch { playSfx('invalid'); showToast('Network error', '#ff7c98') }
     finally { setModalBusy(false) }
+  }
+
+  async function submitDepositAuto() {
+    if (!accessToken) return
+    const amt = Number(depositAmount)
+    if (!Number.isFinite(amt) || amt <= 0) {
+      return showToast('Enter a valid amount', '#ff7c98')
+    }
+    if (!treasuryWallet || !depositTokenContract) {
+      return showToast('Deposit route unavailable', '#ff7c98')
+    }
+    const fromWallet = user?.wallet?.address
+    const eth = (window as typeof window & { ethereum?: { request: (args: { method: string; params?: unknown[] }) => Promise<unknown> } }).ethereum
+    if (!fromWallet || !eth) {
+      setShowManualDeposit(true)
+      return showToast('Wallet send unavailable — use manual tx hash', '#ffcf85')
+    }
+
+    setModalBusy(true)
+    showToast('Awaiting wallet confirmation…', '#9fd2ff')
+    try {
+      const txData = encodeFunctionData({
+        abi: [{
+          type: 'function',
+          name: 'transfer',
+          stateMutability: 'nonpayable',
+          inputs: [{ name: 'to', type: 'address' }, { name: 'value', type: 'uint256' }],
+          outputs: [{ name: '', type: 'bool' }],
+        }],
+        functionName: 'transfer',
+        args: [treasuryWallet as `0x${string}`, parseUnits(String(amt), 6)],
+      })
+
+      const txHash = await eth.request({
+        method: 'eth_sendTransaction',
+        params: [{
+          from: fromWallet,
+          to: depositTokenContract,
+          data: txData,
+          value: '0x0',
+          chainId: '0x2105', // Base mainnet
+        }],
+      }) as string
+
+      if (!txHash?.startsWith('0x')) throw new Error('Wallet transaction failed')
+
+      showToast('Verifying deposit…', '#9fd2ff')
+      const credited = await creditDeposit(txHash, amt)
+      if (!credited.ok) throw new Error(credited.error)
+
+      playSfx('confirm')
+      showToast(`Deposited $${fmt(credited.data.amount_credited)}`, '#7df2a8')
+      fetchBalance()
+      setModal(null)
+    } catch (e) {
+      playSfx('invalid')
+      showToast(e instanceof Error ? e.message : 'Deposit failed', '#ff7c98')
+      setShowManualDeposit(true)
+    } finally {
+      setModalBusy(false)
+    }
   }
 
   async function submitWithdraw() {
@@ -975,7 +1050,7 @@ export default function HolyLiquid() {
               <>
                 <div className="modal-title">Deposit USDC</div>
                 <div className="modal-sub">
-                  Send USDC on <strong>Base</strong> to the treasury wallet below, then paste the transaction hash here to credit your balance.
+                  Deposit USDC on <strong>Base</strong> in one tap. We auto-capture your tx hash and verify on-chain before crediting.
                 </div>
                 <div className="modal-field">
                   <label>Treasury Wallet</label>
@@ -998,21 +1073,38 @@ export default function HolyLiquid() {
                     onChange={(e) => setDepositAmount(e.target.value)}
                   />
                 </div>
-                <div className="modal-field">
-                  <label>Transaction Hash</label>
-                  <input
-                    className="modal-input mono"
-                    type="text"
-                    placeholder="0x..."
-                    value={depositTxHash}
-                    onChange={(e) => setDepositTxHash(e.target.value)}
-                  />
+                {showManualDeposit && (
+                  <div className="modal-field">
+                    <label>Transaction Hash (Fallback)</label>
+                    <input
+                      className="modal-input mono"
+                      type="text"
+                      placeholder="0x..."
+                      value={depositTxHash}
+                      onChange={(e) => setDepositTxHash(e.target.value)}
+                    />
+                  </div>
+                )}
+                <div className="modal-btns">
+                  <button
+                    className="mb submit"
+                    style={{ width: '100%' }}
+                    disabled={modalBusy || !treasuryWallet}
+                    onClick={submitDepositAuto}
+                  >
+                    {modalBusy ? 'Depositing…' : 'Deposit Now'}
+                  </button>
                 </div>
                 <div className="modal-btns">
                   <button className="mb cancel" disabled={modalBusy} onClick={closeModal}>Cancel</button>
-                  <button className="mb submit" disabled={modalBusy || !treasuryWallet} onClick={submitDeposit}>
-                    {modalBusy ? 'Verifying...' : 'Credit Deposit'}
+                  <button className="mb cancel" disabled={modalBusy} onClick={() => setShowManualDeposit(v => !v)}>
+                    {showManualDeposit ? 'Hide Manual' : 'Manual Tx Hash'}
                   </button>
+                  {showManualDeposit && (
+                    <button className="mb submit" disabled={modalBusy || !depositTxHash} onClick={submitDeposit}>
+                      {modalBusy ? 'Verifying…' : 'Verify Manual Tx'}
+                    </button>
+                  )}
                 </div>
               </>
             )}
