@@ -512,6 +512,7 @@ export default function HolyLiquid() {
               <button className="acct-btn withdraw" onClick={openWithdraw}>Cash Out</button>
             </div>
           )}
+          <div className="hdr-util-dot" aria-hidden />
         </div>
 
         <div className="stats-row">
