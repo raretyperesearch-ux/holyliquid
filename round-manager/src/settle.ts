@@ -63,18 +63,6 @@ export async function settleRound(
     winnings: bet.amount + (winningPool > 0 ? (bet.amount / winningPool) * prize : 0),
   }))
 
-  // Update round status
-  await db.rounds.update(round.id, {
-    status:         'settled',
-    close_price:    closePrice.price,
-    close_price_ts: new Date(closePrice.timestamp),
-    result:         result.outcome,
-    pnl_usd:        result.pnlUsd,
-    pnl_pct:        result.pnlPct,
-    fee_collected:  fee,
-    settled_at:     new Date(),
-  })
-
   // Process losses
   for (const bet of losingBets) {
     await db.bets.update(bet.id, { won: false, outcome: 'loss', winnings: 0 })
@@ -103,6 +91,20 @@ export async function settleRound(
       wallet: 'platform', type: 'fee', amount: fee, round_id: round.id,
     })
   }
+
+  // ── Update round status LAST so all bets are settled before any client sees status='settled' ──
+  // This prevents a race where the frontend sees a settled round with unmarked bet outcomes,
+  // which used to cause winners to briefly see "You Lost" before flipping to "You Won".
+  await db.rounds.update(round.id, {
+    status:         'settled',
+    close_price:    closePrice.price,
+    close_price_ts: new Date(closePrice.timestamp),
+    result:         result.outcome,
+    pnl_usd:        result.pnlUsd,
+    pnl_pct:        result.pnlPct,
+    fee_collected:  fee,
+    settled_at:     new Date(),
+  })
 
   await broadcast.roundResult(round.id, result, closePrice.price, posPool, negPool, fee)
   console.log(`[Settle] Round #${round.round_number} settled: ${result.outcome} | PnL: $${result.pnlUsd.toFixed(2)}`)
