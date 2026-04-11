@@ -4,7 +4,7 @@ import { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import dynamic from 'next/dynamic'
 import { createPortal } from 'react-dom'
 import { usePrivy } from '@privy-io/react-auth'
-import { useRound } from '@/hooks/useRound'
+import { useRound, type LastResult } from '@/hooks/useRound'
 import { encodeFunctionData, parseUnits } from 'viem'
 
 const PriceWaterChart = dynamic(() => import('@/components/game/PriceWaterChart'), { ssr: false })
@@ -209,6 +209,7 @@ export default function HolyLiquid() {
 
   // Settle flash (shown briefly when a round result lands)
   const [settleFlash, setSettleFlash] = useState<'win' | 'loss' | null>(null)
+  const [pnlJuice, setPnlJuice] = useState<'win' | 'loss' | 'liq' | null>(null)
   const lastSettledIdRef = useRef<string | null>(null)
 
   useEffect(() => {
@@ -263,7 +264,19 @@ export default function HolyLiquid() {
   }, [selectedChip])
 
   const { round, myBet, refetch, lastResult, clearLastResult } = useRound(accessToken, {
-    onResult: useCallback(() => { fetchBalanceRef.current() }, []),
+    onResult: useCallback((result: LastResult) => {
+      fetchBalanceRef.current()
+      // Trigger PNL card juice based on the round's position outcome.
+      // result_label carries the raw backend outcome (+PNL/-PNL/LIQUIDATED).
+      if (result.result_label === '+PNL') {
+        setPnlJuice('win')
+      } else if (result.result_label === '-PNL') {
+        setPnlJuice('loss')
+      } else if (result.result_label === 'LIQUIDATED') {
+        setPnlJuice('liq')
+      }
+      setTimeout(() => setPnlJuice(null), 1500)
+    }, []),
   })
 
   const fetchBalance = useCallback(async () => {
@@ -895,7 +908,7 @@ export default function HolyLiquid() {
           </div>
 
           {/* ISLAND 2: PnL */}
-          <div className="isl pnl-isl" ref={pnlCardRef}>
+          <div className={`isl pnl-isl${pnlJuice ? ` juice-${pnlJuice}` : ''}`} ref={pnlCardRef}>
             <span className="pnl-mini">PnL</span>
             <span
               ref={pnlTextRef}
