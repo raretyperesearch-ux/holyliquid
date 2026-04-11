@@ -113,7 +113,7 @@ html, body, #__next { width: 100%; min-height: 100%; }
   width:100%;
   gap:8px;
 }
-.hl-hdr .logo-wrap { flex: 0 0 auto; margin-right: auto; }
+.hl-hdr .logo-wrap { flex: 0 1 auto; margin-right: auto; min-width: 0; overflow: hidden; }
 .hl-hdr .sound-toggle { flex: 0 0 auto; }
 .hl-hdr .account-isl,
 .hl-hdr .connect-pill,
@@ -640,7 +640,7 @@ html, body, #__next { width: 100%; min-height: 100%; }
   text-overflow:ellipsis;
 }
 
-@media (max-width: 390px) {
+@media (max-width: 480px) {
   .stats-row { grid-template-columns:minmax(0,1.2fr) minmax(0,.8fr) minmax(0,.78fr); }
   .big-val { font-size:clamp(30px,10vw,44px); }
   .pnl-chg { font-size:clamp(12px,3.6vw,15px); }
@@ -648,14 +648,29 @@ html, body, #__next { width: 100%; min-height: 100%; }
   .split-meta, .settled-tag, .streak-tag, .history-pattern, .history-proof { font-size:8px; }
   .rh-main { font-size:12px; }
   .rh-chip { font-size:9px; }
-  /* On narrow phones, shrink the account island so Deposit/Available/Cash Out fit beside the logo */
+  /* Header compact mode — aggressive shrinkage so Deposit/Available/Cash Out always fits */
+  .hl-ui { padding: 12px 8px; }
+  .hl-hdr { gap: 5px; }
+  .hl-hdr .logo-wrap .ltxt { font-size: 17px; letter-spacing: .12em; }
+  .hl-hdr .tagline { font-size: 7px; gap: 3px; margin-top: 1px; }
+  .hl-hdr .sound-toggle { width: 28px; height: 28px; }
+  .hl-hdr .sound-toggle svg { width: 14px; height: 14px; }
+  .account-isl { padding: 3px; border-radius: 13px; }
+  .acct-btn { padding: 6px 6px; font-size: 7px; letter-spacing: .08em; border-radius: 9px; }
+  .acct-bal { padding: 0 6px; min-width: 54px; margin: 0 2px; }
+  .acct-bal .bl { font-size: 6px; letter-spacing: .18em; }
+  .acct-bal .bv { font-size: 11px; }
+}
+
+@media (max-width: 360px) {
+  /* Absolute smallest phones — drop the "Available" label, keep only the number */
+  .hl-ui { padding: 12px 6px; }
   .hl-hdr { gap: 4px; }
-  .hl-hdr .logo-wrap .ltxt { font-size: 18px; }
-  .hl-hdr .tagline { font-size: 7px; gap: 3px; }
-  .account-isl { padding: 3px; }
-  .acct-btn { padding: 6px 7px; font-size: 7.5px; letter-spacing: .12em; }
-  .acct-bal { padding: 0 7px; min-width: 62px; margin: 0 2px; }
-  .acct-bal .bl { font-size: 6.5px; letter-spacing: .22em; }
+  .hl-hdr .logo-wrap .ltxt { font-size: 15px; }
+  .hl-hdr .tagline { display: none; }
+  .acct-btn { padding: 5px 5px; font-size: 6.5px; }
+  .acct-bal { padding: 0 5px; min-width: 44px; }
+  .acct-bal .bl { display: none; }
   .acct-bal .bv { font-size: 11px; }
 }
 
