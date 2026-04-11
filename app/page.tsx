@@ -516,6 +516,23 @@ export default function HolyLiquid() {
     showToast('Awaiting wallet confirmation…', '#9fd2ff')
 
     try {
+      // ── Switch the wallet to Base mainnet BEFORE sendTransaction.
+      // Privy doesn't auto-switch on every sendTransaction call — if the
+      // embedded wallet's current chainId isn't 8453, it throws with
+      // "chainId should be same as current chainId". Explicit switch fixes it.
+      // Safe to call even if already on Base — no-op.
+      const currentChainId = typeof wallet.chainId === 'string'
+        ? parseInt(wallet.chainId.replace(/^eip155:/, '').replace(/^0x/, ''), wallet.chainId.includes('0x') ? 16 : 10)
+        : Number(wallet.chainId)
+      if (currentChainId !== 8453) {
+        try {
+          await wallet.switchChain(8453)
+        } catch (switchErr) {
+          const switchMsg = switchErr instanceof Error ? switchErr.message : String(switchErr)
+          throw new Error(`Could not switch to Base (chain 8453): ${switchMsg}. Make sure Base is enabled in your Privy dashboard app settings.`)
+        }
+      }
+
       // Encode the USDC transfer call data
       const txData = encodeFunctionData({
         abi: [{
