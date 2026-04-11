@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useRef, useCallback } from 'react'
 import dynamic from 'next/dynamic'
+import { createPortal } from 'react-dom'
 import { usePrivy } from '@privy-io/react-auth'
 import { useRound } from '@/hooks/useRound'
 
@@ -14,6 +15,14 @@ function fmt(n: number) {
 }
 
 type ModalKind = null | 'deposit' | 'withdraw'
+type HistoryRound = {
+  round_number: number
+  result: 'pos' | 'neg' | 'void' | null
+  pnl_pct: number | null
+  settled_at: string | null
+  pos_pool?: number
+  neg_pool?: number
+}
 
 export default function HolyLiquid() {
   const { ready, authenticated, login, getAccessToken, user } = usePrivy()
@@ -36,6 +45,18 @@ export default function HolyLiquid() {
   const [withdrawAmount, setWithdrawAmount] = useState('')
   const [withdrawTo, setWithdrawTo] = useState('')
   const [modalBusy, setModalBusy] = useState(false)
+  const [domReady, setDomReady] = useState(false)
+  const [recentRounds, setRecentRounds] = useState<HistoryRound[]>([])
+  const [heroFontPx, setHeroFontPx] = useState(52)
+  const [pnlFontPx, setPnlFontPx] = useState(15)
+  const [timerFontPx, setTimerFontPx] = useState(16)
+  const audioCtxRef = useRef<AudioContext | null>(null)
+  const heroCardRef = useRef<HTMLDivElement | null>(null)
+  const heroTextRef = useRef<HTMLDivElement | null>(null)
+  const pnlCardRef = useRef<HTMLDivElement | null>(null)
+  const pnlTextRef = useRef<HTMLSpanElement | null>(null)
+  const timerCardRef = useRef<HTMLDivElement | null>(null)
+  const timerTextRef = useRef<HTMLSpanElement | null>(null)
 
   // Settle flash (shown briefly when a round result lands)
   const [settleFlash, setSettleFlash] = useState<'win' | 'loss' | null>(null)
@@ -48,6 +69,22 @@ export default function HolyLiquid() {
       setAccessToken(null)
     }
   }, [authenticated, getAccessToken])
+
+  useEffect(() => {
+    setDomReady(true)
+  }, [])
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    const raw = window.localStorage.getItem('hl:selectedChip')
+    const parsed = raw ? Number(raw) : NaN
+    if (CHIPS.includes(parsed)) setSelectedChip(parsed)
+  }, [])
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    window.localStorage.setItem('hl:selectedChip', String(selectedChip))
+  }, [selectedChip])
 
   const { round, myBet, refetch } = useRound(accessToken)
 
@@ -95,10 +132,61 @@ export default function HolyLiquid() {
     toastTimer.current = setTimeout(() => setToast(null), 3000)
   }
 
+  const ensureAudio = useCallback(() => {
+    if (typeof window === 'undefined') return null
+    const Ctx = window.AudioContext || (window as typeof window & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext
+    if (!Ctx) return null
+    if (!audioCtxRef.current) audioCtxRef.current = new Ctx()
+    if (audioCtxRef.current.state === 'suspended') audioCtxRef.current.resume().catch(() => {})
+    return audioCtxRef.current
+  }, [])
+
+  const playSfx = useCallback((kind: 'chip' | 'side' | 'confirm' | 'invalid' | 'modalOpen' | 'modalClose' | 'win' | 'loss') => {
+    const ctx = ensureAudio()
+    if (!ctx) return
+    const osc = ctx.createOscillator()
+    const gain = ctx.createGain()
+    const now = ctx.currentTime
+    osc.connect(gain)
+    gain.connect(ctx.destination)
+
+    const presets = {
+      chip:      { freq: 620, end: 700, dur: 0.06, vol: 0.05, type: 'triangle' as OscillatorType },
+      side:      { freq: 420, end: 510, dur: 0.08, vol: 0.055, type: 'sine' as OscillatorType },
+      confirm:   { freq: 360, end: 660, dur: 0.12, vol: 0.07, type: 'triangle' as OscillatorType },
+      invalid:   { freq: 220, end: 170, dur: 0.09, vol: 0.06, type: 'sawtooth' as OscillatorType },
+      modalOpen: { freq: 520, end: 430, dur: 0.08, vol: 0.05, type: 'sine' as OscillatorType },
+      modalClose:{ freq: 390, end: 290, dur: 0.07, vol: 0.045, type: 'sine' as OscillatorType },
+      win:       { freq: 520, end: 820, dur: 0.16, vol: 0.075, type: 'triangle' as OscillatorType },
+      loss:      { freq: 320, end: 180, dur: 0.16, vol: 0.065, type: 'square' as OscillatorType },
+    }[kind]
+
+    osc.type = presets.type
+    osc.frequency.setValueAtTime(presets.freq, now)
+    osc.frequency.exponentialRampToValueAtTime(Math.max(80, presets.end), now + presets.dur)
+    gain.gain.setValueAtTime(0.0001, now)
+    gain.gain.exponentialRampToValueAtTime(presets.vol, now + 0.012)
+    gain.gain.exponentialRampToValueAtTime(0.0001, now + presets.dur)
+    osc.start(now)
+    osc.stop(now + presets.dur + 0.01)
+  }, [ensureAudio])
+
+  useEffect(() => {
+    const unlock = () => { ensureAudio() }
+    window.addEventListener('pointerdown', unlock, { passive: true })
+    window.addEventListener('keydown', unlock)
+    return () => {
+      window.removeEventListener('pointerdown', unlock)
+      window.removeEventListener('keydown', unlock)
+    }
+  }, [ensureAudio])
+
   async function placeBet() {
-    if (!accessToken || !round || !selectedSide) return
-    if (countdown.lock <= 0) return showToast('Betting is closed', '#ff7c98')
-    if (balance !== null && selectedChip > balance) return showToast('Insufficient balance', '#ff7c98')
+    if (!accessToken || !round) return
+    if (!selectedSide) { playSfx('invalid'); return showToast('Select a side first', '#ff7c98') }
+    if (countdown.lock <= 0) { playSfx('invalid'); return showToast('Betting is closed', '#ff7c98') }
+    if (balance !== null && selectedChip > balance) { playSfx('invalid'); return showToast('Insufficient balance', '#ff7c98') }
+    playSfx('confirm')
     setBetting(true)
     try {
       const res = await fetch('/api/bet', {
@@ -113,12 +201,12 @@ export default function HolyLiquid() {
       if (json.success) {
         showToast(`Bet placed · $${selectedChip} on ${selectedSide === 'pos' ? '+PNL' : '−PNL'}`, '#7df2a8')
         setBalance(json.data.balance_usdc)
-        setSelectedSide(null)
         refetch()
       } else {
+        playSfx('invalid')
         showToast(json.error || 'Bet failed', '#ff7c98')
       }
-    } catch { showToast('Network error', '#ff7c98') }
+    } catch { playSfx('invalid'); showToast('Network error', '#ff7c98') }
     finally { setBetting(false) }
   }
 
@@ -140,11 +228,13 @@ export default function HolyLiquid() {
   }, [])
 
   function openDeposit() {
+    playSfx('modalOpen')
     setDepositTxHash('')
     setDepositAmount('')
     setModal('deposit')
   }
   function openWithdraw() {
+    playSfx('modalOpen')
     setWithdrawAmount('')
     // Prefill destination with the user's own wallet if available
     const w = user?.wallet?.address
@@ -153,6 +243,7 @@ export default function HolyLiquid() {
   }
   function closeModal() {
     if (modalBusy) return
+    playSfx('modalClose')
     setModal(null)
   }
 
@@ -174,14 +265,16 @@ export default function HolyLiquid() {
       })
       const json = await res.json()
       if (json.success) {
+        playSfx('confirm')
         showToast(`Deposited $${fmt(json.data.amount_credited)}`, '#7df2a8')
         // Refetch balance to get consistent available_usdc semantics
         fetchBalance()
         setModal(null)
       } else {
+        playSfx('invalid')
         showToast(json.error || 'Deposit failed', '#ff7c98')
       }
-    } catch { showToast('Network error', '#ff7c98') }
+    } catch { playSfx('invalid'); showToast('Network error', '#ff7c98') }
     finally { setModalBusy(false) }
   }
 
@@ -206,14 +299,16 @@ export default function HolyLiquid() {
       })
       const json = await res.json()
       if (json.success) {
+        playSfx('confirm')
         showToast(`Withdrew $${fmt(json.data.amount)}`, '#7df2a8')
         // Refetch balance to get consistent available_usdc semantics
         fetchBalance()
         setModal(null)
       } else {
+        playSfx('invalid')
         showToast(json.error || 'Withdraw failed', '#ff7c98')
       }
-    } catch { showToast('Network error', '#ff7c98') }
+    } catch { playSfx('invalid'); showToast('Network error', '#ff7c98') }
     finally { setModalBusy(false) }
   }
 
@@ -223,10 +318,24 @@ export default function HolyLiquid() {
     if (lastSettledIdRef.current === round.id) return
     lastSettledIdRef.current = round.id
     let t: ReturnType<typeof setTimeout> | undefined
-    if (myBet?.won === true)  { setSettleFlash('win');  t = setTimeout(() => setSettleFlash(null), 1300) }
-    if (myBet?.won === false) { setSettleFlash('loss'); t = setTimeout(() => setSettleFlash(null), 1300) }
+    if (myBet?.won === true)  { playSfx('win'); setSettleFlash('win');  t = setTimeout(() => setSettleFlash(null), 1300) }
+    if (myBet?.won === false) { playSfx('loss'); setSettleFlash('loss'); t = setTimeout(() => setSettleFlash(null), 1300) }
     return () => { if (t) clearTimeout(t) }
-  }, [round?.id, round?.status, myBet?.won])
+  }, [round?.id, round?.status, myBet?.won, playSfx])
+
+  useEffect(() => {
+    let cancelled = false
+    async function fetchRecent() {
+      try {
+        const res = await fetch('/api/rounds/history?limit=6')
+        const json = await res.json()
+        if (!cancelled) setRecentRounds(json?.data?.rounds ?? [])
+      } catch {}
+    }
+    fetchRecent()
+    const id = setInterval(fetchRecent, 12_000)
+    return () => { cancelled = true; clearInterval(id) }
+  }, [])
 
   const isLocked = !round || round.status !== 'open' || countdown.lock <= 0
   const pnlPos   = (round?.pnl_usd ?? 0) >= 0
@@ -308,16 +417,6 @@ export default function HolyLiquid() {
     })
   }
 
-  const ctxCountdownLabel = phase === 'betting' ? 'LOCK IN'
-    : phase === 'watching' ? 'CLOSES'
-    : phase === 'settled' ? 'RESULT'
-    : phase === 'void' ? 'VOID'
-    : 'LOADING'
-  const ctxCountdownValue = phase === 'settled' ? (round?.result ?? '--')
-    : phase === 'void' ? '—'
-    : phase === 'loading' ? '--'
-    : timerDisplay
-
   // Profit/loss amount on a settled bet
   const settleWon = myBet?.won === true
   const settleProfit = myBet
@@ -333,6 +432,113 @@ export default function HolyLiquid() {
     : isLocked ? 'Betting Closed'
     : !selectedSide ? 'Select Side'
     : `${selectedSide === 'pos' ? '+PNL' : '−PNL'} · $${selectedChip} · Place Bet`
+
+  const estimatedPayout = (() => {
+    if (!round || !selectedSide) return null
+    const winPool = selectedSide === 'pos' ? Number(round.pos_pool) : Number(round.neg_pool)
+    const losePool = selectedSide === 'pos' ? Number(round.neg_pool) : Number(round.pos_pool)
+    if (!Number.isFinite(winPool) || !Number.isFinite(losePool)) return null
+    if (winPool <= 0) return selectedChip
+    return selectedChip + (selectedChip / winPool) * (losePool * 0.95)
+  })()
+  const ctaSubtext = !selectedSide
+    ? 'Choose +PNL or −PNL to preview payout'
+    : estimatedPayout === null
+      ? 'Live payout unavailable'
+      : `Est. payout $${fmt(estimatedPayout)}`
+
+  const totalPool = Number(round?.pos_pool ?? 0) + Number(round?.neg_pool ?? 0)
+  const posShare = totalPool > 0 ? (Number(round?.pos_pool ?? 0) / totalPool) * 100 : 50
+  const negShare = 100 - posShare
+  const crowdLean = posShare === negShare ? 'Balanced' : posShare > negShare ? 'Crowd leaning +PNL' : 'Crowd leaning −PNL'
+  const baseCrowdBias = posShare > 66
+    ? 'Crowd heavy +PNL · contrarian edge on −PNL'
+    : negShare > 66
+      ? 'Crowd heavy −PNL · contrarian edge on +PNL'
+      : 'Balanced market pressure'
+  const crowdBiasNote = selectedSide === 'pos'
+    ? `You’re against ${Math.round(negShare)}%`
+    : selectedSide === 'neg'
+      ? `You’re against ${Math.round(posShare)}%`
+      : baseCrowdBias
+  const recentSettled = recentRounds.filter(r => r.result === 'pos' || r.result === 'neg' || r.result === 'void')
+  const lastSix = recentSettled.slice(0, 6)
+  const posWins = lastSix.filter(r => r.result === 'pos').length
+  const negWins = lastSix.filter(r => r.result === 'neg').length
+  const streak = (() => {
+    const first = recentSettled[0]?.result
+    if (!first || first === 'void') return null
+    let len = 1
+    for (let i = 1; i < recentSettled.length; i++) {
+      if (recentSettled[i].result !== first) break
+      len += 1
+    }
+    return { side: first, len }
+  })()
+  const patternSignal = !lastSix.length
+    ? 'Pattern loading'
+    : streak && streak.len >= 4
+      ? 'Contrarian chance building'
+    : Math.abs(posWins - negWins) <= 1
+      ? 'Market flipping'
+      : posWins > negWins
+        ? `+PNL won ${posWins}/${lastSix.length}`
+        : `−PNL won ${negWins}/${lastSix.length}`
+  const lastSettledLabel = recentSettled[0]?.settled_at
+    ? `${Math.max(0, Math.round((Date.now() - new Date(recentSettled[0].settled_at as string).getTime()) / 1000))}s ago`
+    : 'live'
+  const payoutMultipleForRound = (r: HistoryRound) => {
+    const pool = Number(r.pos_pool ?? 0) + Number(r.neg_pool ?? 0)
+    const winnerPool = r.result === 'pos' ? Number(r.pos_pool ?? 0) : r.result === 'neg' ? Number(r.neg_pool ?? 0) : 0
+    if (r.result === 'void' || winnerPool <= 0) return null
+    return 1 + (pool * 0.95) / winnerPool
+  }
+  const latestSettle = recentSettled[0] ?? null
+  const latestMult = latestSettle ? payoutMultipleForRound(latestSettle) : null
+  const biggestRecentMult = recentSettled.reduce((mx, r) => {
+    const mult = payoutMultipleForRound(r)
+    return mult && mult > mx ? mult : mx
+  }, 0)
+  const proofLine = biggestRecentMult > 0 ? `Biggest recent payout ${biggestRecentMult.toFixed(2)}×` : 'Recent settles loading'
+  const heroValue = `$${round ? Math.round(round.current_value).toLocaleString() : '---'}`
+  const pnlText = `${pnlPos ? '+' : ''}$${Math.abs(round?.pnl_usd ?? 0).toFixed(2)}`
+
+  useEffect(() => {
+    const fitText = (
+      textEl: HTMLElement | null,
+      cardEl: HTMLElement | null,
+      max: number,
+      min: number,
+      setter: (n: number) => void,
+    ) => {
+      if (!textEl || !cardEl) return
+      const width = Math.max(0, cardEl.clientWidth - 18)
+      let size = max
+      textEl.style.fontSize = `${size}px`
+      while (size > min && textEl.scrollWidth > width) {
+        size -= 1
+        textEl.style.fontSize = `${size}px`
+      }
+      setter(size)
+    }
+
+    const runFit = () => {
+      fitText(heroTextRef.current, heroCardRef.current, 52, 18, setHeroFontPx)
+      fitText(pnlTextRef.current, pnlCardRef.current, 15, 10, setPnlFontPx)
+      fitText(timerTextRef.current, timerCardRef.current, 16, 11, setTimerFontPx)
+    }
+
+    runFit()
+    const ro = new ResizeObserver(() => runFit())
+    if (heroCardRef.current) ro.observe(heroCardRef.current)
+    if (pnlCardRef.current) ro.observe(pnlCardRef.current)
+    if (timerCardRef.current) ro.observe(timerCardRef.current)
+    window.addEventListener('resize', runFit)
+    return () => {
+      ro.disconnect()
+      window.removeEventListener('resize', runFit)
+    }
+  }, [heroValue, pnlText, timerDisplay])
 
   return (
     <div className="hl-root">
@@ -373,45 +579,69 @@ export default function HolyLiquid() {
         {/* HEADER */}
         <div className="hl-hdr">
           <div className="logo-wrap">
-            <div className="lsub">Base Prediction</div>
             <div className="ltxt">HOLYLIQUID</div>
           </div>
-          {!ready ? null : !authenticated ? (
+          {!ready ? (
+            <div className="isl account-isl skeleton-account" />
+          ) : !authenticated ? (
             <button className="isl connect-pill" onClick={login}>Connect</button>
           ) : (
-            <div className="isl account-isl">
+            <div className="isl account-isl account-center">
               <button className="acct-btn deposit" onClick={openDeposit}>Deposit</button>
               <div className="acct-bal">
-                <div className="bl">Balance</div>
+                <div className="bl">Available</div>
                 <div className="bv">{balance !== null ? `$${fmt(balance)}` : '---'}</div>
               </div>
-              <button className="acct-btn withdraw" onClick={openWithdraw}>Withdraw</button>
+              <button className="acct-btn withdraw" onClick={openWithdraw}>Cash Out</button>
             </div>
           )}
         </div>
 
-        {/* ISLAND 1: Position Value */}
-        <div className="isl val-isl">
-          <div className="vi-lbl">{posLabel}</div>
-          <div className={`big-val ${pnlPos ? 'pos' : 'neg'}`}>
-            ${round ? Math.round(round.current_value).toLocaleString() : '---'}
+        <div className="stats-row">
+          {/* ISLAND 1: Position Value */}
+          <div className="isl val-isl" ref={heroCardRef}>
+            <div className="vi-lbl">{posLabel}</div>
+            <div ref={heroTextRef} className={`big-val ${pnlPos ? 'pos' : 'neg'}`} style={{ fontSize: `${heroFontPx}px` }}>
+              {heroValue}
+            </div>
+          </div>
+
+          {/* ISLAND 2: PnL */}
+          <div className="isl pnl-isl" ref={pnlCardRef}>
+            <span className="pnl-mini">PnL</span>
+            <span
+              ref={pnlTextRef}
+              className="pnl-chg"
+              style={{ color: pnlPos ? '#7df2a8' : '#ff7c98', fontSize: `${pnlFontPx}px` }}
+            >
+              {pnlText}
+            </span>
+            <span className="pnl-pct">
+              {pnlPos ? '+' : ''}{(round?.pnl_pct ?? 0).toFixed(2)}%
+            </span>
+            <span className="pnl-round">Round #{round?.round_number ?? '---'}</span>
+          </div>
+
+          {/* ISLAND 3: Timer */}
+          <div className="isl timer-isl" ref={timerCardRef}>
+            <div className="ti-row">
+              <span
+                className={`phase-lbl${isFinalCountdown ? ' locking-soon' : ''}`}
+                style={{ color: phaseColor }}
+              >
+                {phaseLabel}
+              </span>
+              <span ref={timerTextRef} className={`timer-num${isFinalCountdown ? ' locking-soon' : ''}`} style={{ fontSize: `${timerFontPx}px` }}>
+                {timerDisplay}
+              </span>
+            </div>
+            <div className="prog-tr">
+              <div className="prog-f" style={{ width: `${Math.max(0, Math.min(100, progressPct))}%`, background: progColor }} />
+            </div>
           </div>
         </div>
 
-        {/* ISLAND 2: PnL */}
-        <div className="isl pnl-isl">
-          <span className="pnl-chg" style={{ color: pnlPos ? '#7df2a8' : '#ff7c98' }}>
-            {pnlPos ? '+' : ''}${Math.abs(round?.pnl_usd ?? 0).toFixed(2)}
-          </span>
-          <div className="pnl-div" />
-          <span className="pnl-pct">
-            {pnlPos ? '+' : ''}{(round?.pnl_pct ?? 0).toFixed(2)}%
-          </span>
-          <div className="pnl-div" />
-          <span className="pnl-round">Round #{round?.round_number ?? '---'}</span>
-        </div>
-
-        {/* CONTEXT STRIP: Entry / Now / Lock-in */}
+        {/* CONTEXT STRIP: Entry / Now / Players Live */}
         <div className="isl ctx-isl">
           <div className="ctx-col">
             <div className="ctx-lbl">Entry</div>
@@ -426,29 +656,26 @@ export default function HolyLiquid() {
           </div>
           <div className="ctx-div" />
           <div className="ctx-col">
-            <div className="ctx-lbl">{ctxCountdownLabel}</div>
+            <div className="ctx-lbl">Players Live</div>
             <div className={`ctx-val${isFinalCountdown ? ' locking-soon' : ''}`}>
-              {ctxCountdownValue}
+              {round ? Math.round((Number(round.pos_pool) + Number(round.neg_pool)) / 12) : '--'}
             </div>
           </div>
         </div>
-
-        {/* ISLAND 3: Timer */}
-        <div className="isl timer-isl">
-          <div className="ti-row">
-            <span
-              className={`phase-lbl${isFinalCountdown ? ' locking-soon' : ''}`}
-              style={{ color: phaseColor }}
-            >
-              {phaseLabel}
-            </span>
-            <span className={`timer-num${isFinalCountdown ? ' locking-soon' : ''}`}>
-              {timerDisplay}
-            </span>
+        <div className="isl split-isl">
+          <div className="split-head">
+            <span>Market Split</span>
+            <span>{crowdLean}</span>
           </div>
-          <div className="prog-tr">
-            <div className="prog-f" style={{ width: `${Math.max(0, Math.min(100, progressPct))}%`, background: progColor }} />
+          <div className="split-track">
+            <div className="split-pos" style={{ width: `${Math.max(0, posShare)}%` }} />
+            <div className="split-neg" style={{ width: `${Math.max(0, negShare)}%` }} />
           </div>
+          <div className="split-meta">
+            <span>+PNL {posShare.toFixed(0)}%</span>
+            <span>−PNL {negShare.toFixed(0)}%</span>
+          </div>
+          <div className="split-note">{crowdBiasNote}</div>
         </div>
 
         {/* boat-zone spacer — keeps flex layout spacing */}
@@ -485,14 +712,18 @@ export default function HolyLiquid() {
           <>
             {/* ISLAND 4: Chips */}
             <div className="isl chips-isl">
-              <div className="ci-lbl">Bet Amount</div>
+              <div className="ci-lbl">1 · Select Amount</div>
               <div className="chips-row">
                 {CHIPS.map(c => (
-                  <div key={c} className={`chip${selectedChip === c ? ' sel' : ''}`} onClick={() => setSelectedChip(c)}>
+                  <div key={c} className={`chip${selectedChip === c ? ' sel' : ''}`} onClick={() => { playSfx('chip'); setSelectedChip(c) }}>
                     ${c}
                   </div>
                 ))}
-                <div className="chip" style={{ fontSize: 9 }} onClick={() => balance && setSelectedChip(Math.min(Math.floor(balance), 500))}>
+                <div className="chip" style={{ fontSize: 9 }} onClick={() => {
+                  if (!balance) return
+                  playSfx('chip')
+                  setSelectedChip(Math.min(Math.floor(balance), 500))
+                }}>
                   MAX
                 </div>
               </div>
@@ -502,31 +733,84 @@ export default function HolyLiquid() {
             <div className="btns-row">
               <button
                 className={`sb sb-pos${selectedSide === 'pos' ? ' on' : ''}${isLocked ? ' sb-locked' : ''}`}
-                disabled={isLocked}
-                onClick={() => setSelectedSide(prev => prev === 'pos' ? null : 'pos')}
+                onClick={() => {
+                  if (isLocked) return playSfx('invalid')
+                  playSfx('side')
+                  setSelectedSide(prev => prev === 'pos' ? null : 'pos')
+                }}
               >+PNL</button>
               <button
                 className={`sb sb-neg${selectedSide === 'neg' ? ' on' : ''}${isLocked ? ' sb-locked' : ''}`}
-                disabled={isLocked}
-                onClick={() => setSelectedSide(prev => prev === 'neg' ? null : 'neg')}
+                onClick={() => {
+                  if (isLocked) return playSfx('invalid')
+                  playSfx('side')
+                  setSelectedSide(prev => prev === 'neg' ? null : 'neg')
+                }}
               >−PNL</button>
             </div>
 
             {/* ISLAND 6: Confirm */}
             <button
               className={`cfm-isl${selectedSide && !isLocked ? ' rdy' : ''}`}
-              disabled={!selectedSide || isLocked || betting}
+              disabled={betting}
               onClick={placeBet}
             >
-              {cfmText}
+              <span className="cfm-main">{cfmText}</span>
+              <span className="cfm-sub">{ctaSubtext}</span>
             </button>
           </>
         )}
+
+        <div className="isl history-isl">
+          <div className="history-hdr">
+            <span>Market Activity</span>
+            <span className="history-dot">Recent Settles</span>
+          </div>
+          <div className="history-meta">
+            <span className={`streak-tag ${streak?.side === 'pos' ? 'pos' : streak?.side === 'neg' ? 'neg' : ''}`}>
+              {streak ? `${streak.side === 'pos' ? '+PNL' : '−PNL'} streak ×${streak.len}` : 'No active streak'}
+            </span>
+            <span className="settled-tag">Last settle {lastSettledLabel}</span>
+          </div>
+          {latestSettle && (
+            <div className={`result-hit ${latestSettle.result === 'pos' ? 'pos' : latestSettle.result === 'neg' ? 'neg' : 'void'}`}>
+              <div className="rh-left">
+                <div className="rh-main">{latestSettle.result === 'pos' ? '+PNL WON' : latestSettle.result === 'neg' ? '−PNL WON' : 'VOID ROUND'}</div>
+                <div className="rh-sub">
+                  R{latestSettle.round_number} · Pool ${Math.round((Number(latestSettle.pos_pool ?? 0) + Number(latestSettle.neg_pool ?? 0))).toLocaleString()}
+                </div>
+              </div>
+              <div className="rh-chip">
+                {latestMult ? `${latestMult.toFixed(2)}× PAID` : 'VOID'}
+              </div>
+            </div>
+          )}
+          <div className="history-pattern">{patternSignal}</div>
+          <div className="history-proof">{proofLine}</div>
+          <div className="history-tape">
+            {(recentRounds.length ? recentRounds : [{ round_number: 0, result: null, pnl_pct: null, settled_at: null }]).map((r, i) => {
+              const result = r.result === 'void' ? 'VOID' : r.result === 'pos' ? '+PNL' : r.result === 'neg' ? '−PNL' : '—'
+              const resultClass = r.result === 'void' ? 'void' : r.result === 'pos' ? 'pos' : r.result === 'neg' ? 'neg' : ''
+              const pool = Number(r.pos_pool ?? 0) + Number(r.neg_pool ?? 0)
+              const mult = payoutMultipleForRound(r)
+              return (
+                <div className={`history-pill ${resultClass}`} key={`${r.round_number}-${i}`}>
+                  <span className="hr-round">{r.round_number ? `R${r.round_number}` : 'Soon'}</span>
+                  <span className="hr-side">{result} {mult ? `${mult.toFixed(2)}×` : ''}</span>
+                  <span className="hr-meta">
+                    {r.pnl_pct !== null ? `${r.pnl_pct > 0 ? '+' : ''}${r.pnl_pct.toFixed(1)}%` : 'Pending'}
+                    {pool > 0 ? ` · $${Math.round(pool)}` : ''}
+                  </span>
+                </div>
+              )
+            })}
+          </div>
+        </div>
         </div>
       </div>
 
       {/* ── DEPOSIT / WITHDRAW MODAL ── */}
-      {modal && (
+      {modal && domReady && createPortal(
         <div className="modal-backdrop" onClick={closeModal}>
           <div className="modal-card" onClick={(e) => e.stopPropagation()}>
             {modal === 'deposit' && (
@@ -617,7 +901,7 @@ export default function HolyLiquid() {
             )}
           </div>
         </div>
-      )}
+      , document.body)}
 
       {/* TOAST */}
       {toast && (
