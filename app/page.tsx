@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useRef, useCallback } from 'react'
+import { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import dynamic from 'next/dynamic'
 import { createPortal } from 'react-dom'
 import { usePrivy } from '@privy-io/react-auth'
@@ -11,6 +11,15 @@ const PriceWaterChart = dynamic(() => import('@/components/game/PriceWaterChart'
 const CHIPS = [5, 10, 25, 50, 100]
 const MVP_ASSET_LABEL = 'ETH'
 const WELCOME_SEEN_KEY = 'hl:welcomeSeen:v1'
+const SPOTLIGHT_DONE_KEY = 'hl:spotlightDone:v1'
+
+type SpotlightStepId = 'chips' | 'sides' | 'confirm' | 'account'
+
+type SpotlightStep = {
+  id: SpotlightStepId
+  title: string
+  text: string
+}
 
 function fmt(n: number) {
   return n.toLocaleString('en-US', { maximumFractionDigits: 2 })
@@ -69,6 +78,8 @@ export default function HolyLiquid() {
   const [modalBusy, setModalBusy] = useState(false)
   const [domReady, setDomReady] = useState(false)
   const [showWelcome, setShowWelcome] = useState(false)
+  const [spotlightStep, setSpotlightStep] = useState<number | null>(null)
+  const [spotlightRect, setSpotlightRect] = useState<DOMRect | null>(null)
   const [recentRounds, setRecentRounds] = useState<HistoryRound[]>([])
   const [heroFontPx, setHeroFontPx] = useState(52)
   const [pnlFontPx, setPnlFontPx] = useState(15)
@@ -80,6 +91,10 @@ export default function HolyLiquid() {
   const pnlTextRef = useRef<HTMLSpanElement | null>(null)
   const timerCardRef = useRef<HTMLDivElement | null>(null)
   const timerTextRef = useRef<HTMLSpanElement | null>(null)
+  const chipsGuideRef = useRef<HTMLDivElement | null>(null)
+  const sidesGuideRef = useRef<HTMLDivElement | null>(null)
+  const confirmGuideRef = useRef<HTMLButtonElement | null>(null)
+  const accountGuideRef = useRef<HTMLElement | null>(null)
 
   // Settle flash (shown briefly when a round result lands)
   const [settleFlash, setSettleFlash] = useState<'win' | 'loss' | null>(null)
@@ -102,6 +117,27 @@ export default function HolyLiquid() {
     const seen = window.localStorage.getItem(WELCOME_SEEN_KEY) === '1'
     if (!seen) setShowWelcome(true)
   }, [domReady])
+
+  const spotlightSteps: SpotlightStep[] = useMemo(() => [
+    { id: 'chips', title: 'Pick Risk', text: 'Pick how much you want to risk.' },
+    { id: 'sides', title: 'Choose Side', text: 'Bet whether the leveraged ETH position closes +PNL or −PNL.' },
+    { id: 'confirm', title: 'Lock It In', text: 'Place your bet before the round locks.' },
+    { id: 'account', title: 'Fund Up', text: 'Fund your balance to start playing fast.' },
+  ], [])
+
+  const getStepTarget = useCallback((id: SpotlightStepId) => {
+    if (id === 'chips') return chipsGuideRef.current
+    if (id === 'sides') return sidesGuideRef.current
+    if (id === 'confirm') return confirmGuideRef.current
+    return accountGuideRef.current
+  }, [])
+
+  const findNextAvailableStep = useCallback((start: number) => {
+    for (let i = start; i < spotlightSteps.length; i++) {
+      if (getStepTarget(spotlightSteps[i].id)) return i
+    }
+    return null
+  }, [getStepTarget, spotlightSteps])
 
   useEffect(() => {
     if (typeof window === 'undefined') return
@@ -280,7 +316,42 @@ export default function HolyLiquid() {
     }
     playSfx('modalClose')
     setShowWelcome(false)
+    if (typeof window !== 'undefined') {
+      const done = window.localStorage.getItem(SPOTLIGHT_DONE_KEY) === '1'
+      if (!done) {
+        requestAnimationFrame(() => {
+          setSpotlightStep(findNextAvailableStep(0))
+        })
+      }
+    }
   }
+
+  function finishSpotlight() {
+    if (typeof window !== 'undefined') {
+      window.localStorage.setItem(SPOTLIGHT_DONE_KEY, '1')
+    }
+    setSpotlightStep(null)
+  }
+
+  function nextSpotlight() {
+    if (spotlightStep === null) return finishSpotlight()
+    const next = findNextAvailableStep(spotlightStep + 1)
+    if (next === null) return finishSpotlight()
+    setSpotlightStep(next)
+  }
+
+  useEffect(() => {
+    if (spotlightStep === null || showWelcome || modal) return
+    const updateRect = () => {
+      const step = spotlightSteps[spotlightStep]
+      const target = step ? getStepTarget(step.id) : null
+      if (!target) return setSpotlightRect(null)
+      setSpotlightRect(target.getBoundingClientRect())
+    }
+    updateRect()
+    window.addEventListener('resize', updateRect)
+    return () => window.removeEventListener('resize', updateRect)
+  }, [getStepTarget, modal, showWelcome, spotlightStep, spotlightSteps])
 
   async function submitDeposit() {
     if (!accessToken) return
@@ -618,9 +689,9 @@ export default function HolyLiquid() {
           {!ready ? (
             <div className="isl account-isl skeleton-account" />
           ) : !authenticated ? (
-            <button className="isl connect-pill" onClick={login}>Connect</button>
+            <button className="isl connect-pill" ref={(el) => { accountGuideRef.current = el }} onClick={login}>Connect</button>
           ) : (
-            <div className="isl account-isl account-center">
+            <div className="isl account-isl account-center" ref={(el) => { accountGuideRef.current = el }}>
               <button className="acct-btn deposit" onClick={openDeposit}>Deposit</button>
               <div className="acct-bal">
                 <div className="bl">Available</div>
@@ -746,7 +817,7 @@ export default function HolyLiquid() {
         ) : (
           <>
             {/* ISLAND 4: Chips */}
-            <div className="isl chips-isl">
+            <div className="isl chips-isl" ref={chipsGuideRef}>
               <div className="ci-lbl">1 · Select Amount</div>
               <div className="chips-row">
                 {CHIPS.map(c => (
@@ -765,7 +836,7 @@ export default function HolyLiquid() {
             </div>
 
             {/* ISLANDS 5a & 5b */}
-            <div className="btns-row">
+            <div className="btns-row" ref={sidesGuideRef}>
               <button
                 className={`sb sb-pos${selectedSide === 'pos' ? ' on' : ''}${isLocked ? ' sb-locked' : ''}`}
                 onClick={() => {
@@ -786,6 +857,7 @@ export default function HolyLiquid() {
 
             {/* ISLAND 6: Confirm */}
             <button
+              ref={confirmGuideRef}
               className={`cfm-isl${selectedSide && !isLocked ? ' rdy' : ''}`}
               disabled={betting}
               onClick={placeBet}
@@ -849,11 +921,11 @@ export default function HolyLiquid() {
         <div className="modal-backdrop welcome-backdrop" onClick={dismissWelcome}>
           <div className="modal-card welcome-card" onClick={(e) => e.stopPropagation()}>
             <div className="welcome-kicker">Welcome to HolyLiquid</div>
-            <div className="welcome-title">Flip your balance on 30-second ETH rounds</div>
+            <div className="welcome-title">Bet whether the live leveraged ETH position closes +PNL or −PNL</div>
             <div className="welcome-steps">
               <div className="welcome-step"><span>1</span>Pick your amount</div>
-              <div className="welcome-step"><span>2</span>Choose +PNL or −PNL</div>
-              <div className="welcome-step"><span>3</span>Win when the round settles</div>
+              <div className="welcome-step"><span>2</span>Choose +PNL or −PNL before lock</div>
+              <div className="welcome-step"><span>3</span>Win when the leveraged position settles</div>
             </div>
             <div className="welcome-notes">
               <span>Live ETH price</span>
@@ -863,6 +935,43 @@ export default function HolyLiquid() {
             <div className="welcome-ctas">
               <button className="welcome-btn primary" onClick={dismissWelcome}>Start Playing</button>
               <button className="welcome-btn ghost" onClick={dismissWelcome}>Watch a Round First</button>
+            </div>
+          </div>
+        </div>
+      , document.body)}
+
+      {/* ── QUICK SPOTLIGHT GUIDE ── */}
+      {spotlightStep !== null && !showWelcome && !modal && domReady && createPortal(
+        <div className="spotlight-overlay">
+          {spotlightRect && (
+            <>
+              <div
+                className="spotlight-ring"
+                style={{
+                  left: spotlightRect.left - 8,
+                  top: spotlightRect.top - 8,
+                  width: spotlightRect.width + 16,
+                  height: spotlightRect.height + 16,
+                }}
+              />
+              <div
+                className="spotlight-arrow"
+                style={{
+                  left: spotlightRect.left + spotlightRect.width / 2 - 10,
+                  top: Math.max(10, spotlightRect.top - 26),
+                }}
+              />
+            </>
+          )}
+          <div className="spotlight-card">
+            <div className="spotlight-step">Quick Guide · {spotlightStep + 1}/{spotlightSteps.length}</div>
+            <div className="spotlight-title">{spotlightSteps[spotlightStep]?.title}</div>
+            <div className="spotlight-text">{spotlightSteps[spotlightStep]?.text}</div>
+            <div className="spotlight-actions">
+              <button className="spotlight-btn ghost" onClick={finishSpotlight}>Skip</button>
+              <button className="spotlight-btn primary" onClick={nextSpotlight}>
+                {spotlightStep >= spotlightSteps.length - 1 ? 'Done' : 'Next'}
+              </button>
             </div>
           </div>
         </div>

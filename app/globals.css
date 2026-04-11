@@ -25,6 +25,14 @@ html, body, #__next { width: 100%; height: 100%; }
   from{opacity:0;transform:translateX(-50%) translateY(-6px)}
   to{opacity:1;transform:translateX(-50%) translateY(0)}
 }
+@keyframes pulseRing {
+  0%,100% { box-shadow: 0 0 0 0 rgba(123,44,255,.35), 0 0 22px rgba(123,44,255,.55), inset 0 0 0 1px rgba(255,255,255,.18); }
+  50% { box-shadow: 0 0 0 7px rgba(123,44,255,.1), 0 0 34px rgba(123,44,255,.78), inset 0 0 0 1px rgba(255,255,255,.26); }
+}
+@keyframes bobArrow {
+  0%,100% { transform: translateY(0); opacity: .9; }
+  50% { transform: translateY(4px); opacity: 1; }
+}
 
 /* ROOT */
 .hl-root {
@@ -753,4 +761,86 @@ html, body, #__next { width: 100%; height: 100%; }
 }
 .welcome-btn:hover {
   transform: translateY(-1px);
+}
+
+/* ── QUICK SPOTLIGHT TUTORIAL ── */
+.spotlight-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 225;
+  background: rgba(3,4,12,.66);
+  backdrop-filter: blur(3px);
+  -webkit-backdrop-filter: blur(3px);
+}
+.spotlight-ring {
+  position: fixed;
+  border-radius: 16px;
+  border: 1px solid rgba(168,132,255,.95);
+  pointer-events: none;
+  animation: pulseRing 1.15s ease-in-out infinite;
+}
+.spotlight-arrow {
+  position: fixed;
+  width: 20px;
+  height: 20px;
+  clip-path: polygon(50% 100%, 0 0, 100% 0);
+  background: linear-gradient(180deg,#dfcdff,#8f66ff);
+  filter: drop-shadow(0 0 9px rgba(143,102,255,.75));
+  pointer-events: none;
+  animation: bobArrow 1s ease-in-out infinite;
+}
+.spotlight-card {
+  position: fixed;
+  left: 50%;
+  bottom: 18px;
+  transform: translateX(-50%);
+  width: min(392px, calc(100% - 20px));
+  border-radius: 18px;
+  padding: 12px 12px 11px;
+  background: linear-gradient(180deg,rgba(14,12,34,.96),rgba(8,8,20,.98));
+  border: .5px solid rgba(255,255,255,.14);
+  box-shadow: 0 24px 45px rgba(0,0,0,.55), inset 0 1px 0 rgba(255,255,255,.14);
+}
+.spotlight-step {
+  font-size: 8px;
+  letter-spacing: .24em;
+  text-transform: uppercase;
+  color: rgba(217,196,255,.76);
+  margin-bottom: 6px;
+}
+.spotlight-title {
+  font-size: 15px;
+  font-weight: 800;
+  color: #fff;
+}
+.spotlight-text {
+  margin-top: 4px;
+  font-size: 11px;
+  line-height: 1.35;
+  color: rgba(255,255,255,.74);
+}
+.spotlight-actions {
+  margin-top: 10px;
+  display: flex;
+  gap: 8px;
+}
+.spotlight-btn {
+  flex: 1;
+  border-radius: 12px;
+  padding: 10px;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: .17em;
+  text-transform: uppercase;
+  border: .5px solid rgba(255,255,255,.14);
+  cursor: pointer;
+}
+.spotlight-btn.primary {
+  color: #fff;
+  border-color: rgba(123,44,255,.55);
+  background: linear-gradient(180deg,#8C64FF 0%,#5A2BFF 56%,#29118F 100%);
+}
+.spotlight-btn.ghost {
+  color: rgba(255,255,255,.7);
+  background: rgba(255,255,255,.04);
 }
