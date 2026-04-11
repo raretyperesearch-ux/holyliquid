@@ -3,7 +3,7 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import dynamic from 'next/dynamic'
 import { createPortal } from 'react-dom'
-import { usePrivy } from '@privy-io/react-auth'
+import { usePrivy, useSendTransaction, useWallets } from '@privy-io/react-auth'
 import { useRound, type LastResult } from '@/hooks/useRound'
 import { LiveTicker } from './components/LiveTicker'
 import { DiscordButton } from './components/DiscordButton'
@@ -144,8 +144,11 @@ function LastResultBanner({
 
 export default function HolyLiquid() {
   const { ready, authenticated, login, getAccessToken, user } = usePrivy()
+  const { wallets } = useWallets()
+  const { sendTransaction } = useSendTransaction()
   const [accessToken, setAccessToken] = useState<string | null>(null)
   const [balance, setBalance] = useState<number | null>(null)
+  const [tempName, setTempName] = useState<string | null>(null)
   const fetchBalanceRef = useRef<() => Promise<void>>(async () => {})
   const lastBetRef = useRef<{ side: 'pos' | 'neg'; amount: number } | null>(null)
   const [selectedChip, setSelectedChip] = useState(10)
@@ -266,7 +269,10 @@ export default function HolyLiquid() {
     try {
       const res = await fetch('/api/balance', { headers: { Authorization: `Bearer ${accessToken}` } })
       const json = await res.json()
-      if (json.data) setBalance(json.data.available_usdc)
+      if (json.data) {
+        setBalance(json.data.available_usdc)
+        setTempName(json.data.temp_name ?? null)
+      }
     } catch {}
   }, [accessToken])
 
@@ -498,15 +504,19 @@ export default function HolyLiquid() {
     if (!treasuryWallet || !depositTokenContract) {
       return showToast('Deposit route unavailable', '#ff7c98')
     }
-    const fromWallet = user?.wallet?.address
-    const eth = (window as typeof window & { ethereum?: { request: (args: { method: string; params?: unknown[] }) => Promise<unknown> } }).ethereum
-    if (!fromWallet || !eth) {
-      return showToast('Wallet send unavailable on this device', '#ff7c98')
+
+    // Get the user's wallet — prefer Privy embedded, fall back to first connected
+    const embedded = wallets.find(w => w.walletClientType === 'privy')
+    const wallet = embedded ?? wallets[0]
+    if (!wallet) {
+      return showToast('No wallet available. Please log in again.', '#ff7c98')
     }
 
     setModalBusy(true)
     showToast('Awaiting wallet confirmation…', '#9fd2ff')
+
     try {
+      // Encode the USDC transfer call data
       const txData = encodeFunctionData({
         abi: [{
           type: 'function',
@@ -519,18 +529,27 @@ export default function HolyLiquid() {
         args: [treasuryWallet as `0x${string}`, parseUnits(String(amt), 6)],
       })
 
-      const txHash = await eth.request({
-        method: 'eth_sendTransaction',
-        params: [{
-          from: fromWallet,
-          to: depositTokenContract,
+      // Send via Privy's native API (works with embedded AND external wallets)
+      const result = await sendTransaction(
+        {
+          to: depositTokenContract as `0x${string}`,
           data: txData,
-          value: '0x0',
-          chainId: '0x2105', // Base mainnet
-        }],
-      }) as string
+          value: BigInt(0),
+          chainId: 8453,  // Base mainnet
+        },
+        {
+          address: wallet.address as `0x${string}`,
+          uiOptions: {
+            showWalletUIs: true,
+            description: `Deposit $${amt} USDC to HolyLiquid`,
+          },
+        }
+      )
 
-      if (!txHash?.startsWith('0x')) throw new Error('Wallet transaction failed')
+      const txHash = result.hash
+      if (!txHash || !txHash.startsWith('0x')) {
+        throw new Error('Wallet did not return a valid transaction hash')
+      }
 
       showToast('Verifying deposit…', '#9fd2ff')
       const credited = await creditDeposit(txHash, amt)
@@ -542,7 +561,13 @@ export default function HolyLiquid() {
       setModal(null)
     } catch (e) {
       playSfx('invalid')
-      showToast(e instanceof Error ? e.message : 'Deposit failed', '#ff7c98')
+      const msg = e instanceof Error ? e.message : 'Deposit failed'
+      // User rejection is not an error worth shouting about
+      if (msg.toLowerCase().includes('reject') || msg.toLowerCase().includes('user denied')) {
+        showToast('Cancelled', '#aaa')
+      } else {
+        showToast(msg, '#ff7c98')
+      }
     } finally {
       setModalBusy(false)
     }
@@ -1193,6 +1218,11 @@ export default function HolyLiquid() {
             {modal === 'deposit' && (
               <>
                 <div className="modal-title">Deposit USDC</div>
+                {tempName && (
+                  <div className="modal-tempname">
+                    signed in as <strong>{tempName}</strong>
+                  </div>
+                )}
                 <div className="modal-sub">
                   Deposit USDC on <strong>Base</strong> in one tap. Confirm the transfer in your wallet and we&apos;ll credit your balance automatically.
                 </div>
@@ -1269,6 +1299,11 @@ export default function HolyLiquid() {
             {modal === 'withdraw' && (
               <>
                 <div className="modal-title">Withdraw USDC</div>
+                {tempName && (
+                  <div className="modal-tempname">
+                    signed in as <strong>{tempName}</strong>
+                  </div>
+                )}
                 <div className="modal-sub">
                   Withdraw USDC on <strong>Base</strong> to any wallet. Minimum $1, maximum $10,000 per withdrawal.
                 </div>
