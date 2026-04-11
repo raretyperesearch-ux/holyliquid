@@ -2,6 +2,54 @@ import { NextRequest } from 'next/server'
 import { ok, serverError } from '@/lib/auth'
 
 const ORACLE_URL = process.env.ORACLE_SERVICE_URL || 'http://localhost:8000'
+const MVP_PAIR = process.env.HL_MVP_PAIR || 'ETH/USD'
+type OraclePriceMap = Record<string, { price?: number }>
+type RoundRow = {
+  id: string
+  round_number: number
+  version: number
+  pair: string
+  direction: 'long' | 'short'
+  position_size: number
+  leverage: number
+  liq_price: number
+  open_price: number
+  open_price_ts: string
+  pos_pool: number
+  neg_pool: number
+  status: string
+  round_seed: string
+  result: string | null
+  betting_closes_at: string
+  closes_at: string
+  created_at: string
+}
+
+function selectDisplayRound(rounds: RoundRow[], nowMs: number): RoundRow | null {
+  if (!rounds.length) return null
+
+  const withTimes = rounds
+    .map(r => ({
+      row: r,
+      opensAt: new Date(r.open_price_ts).getTime(),
+      closesAt: new Date(r.closes_at).getTime(),
+    }))
+    .filter(r => Number.isFinite(r.opensAt) && Number.isFinite(r.closesAt))
+
+  const live = withTimes
+    .filter(r => r.opensAt <= nowMs && nowMs < r.closesAt)
+    .sort((a, b) => a.closesAt - b.closesAt || a.opensAt - b.opensAt)
+  if (live.length) return live[0].row
+
+  const upcoming = withTimes
+    .filter(r => r.opensAt > nowMs)
+    .sort((a, b) => a.opensAt - b.opensAt)
+  if (upcoming.length) return upcoming[0].row
+
+  const recentPast = withTimes
+    .sort((a, b) => b.closesAt - a.closesAt)
+  return recentPast[0]?.row ?? null
+}
 
 export async function GET(req: NextRequest) {
   try {
@@ -15,16 +63,17 @@ export async function GET(req: NextRequest) {
     const { createServerSupabase } = await import('@/lib/supabase/server')
     const sb = createServerSupabase()
 
-    // Get most recent non-void round
-    const { data: round, error } = await sb
+    // MVP mode defaults to one pair; can be expanded by changing HL_MVP_PAIR.
+    const { data, error } = await sb
       .from('hl_rounds')
       .select('*')
+      .eq('pair', MVP_PAIR)
       .in('status', ['open', 'locked', 'settling', 'settled'])
       .order('created_at', { ascending: false })
-      .limit(1)
-      .single()
+      .limit(12)
 
     if (error && error.code !== 'PGRST116') throw error
+    const round = selectDisplayRound((data ?? []) as RoundRow[], Date.now())
     if (!round) return ok({ round: null })
 
     // Get current price from oracle
@@ -32,7 +81,7 @@ export async function GET(req: NextRequest) {
     try {
       const res = await fetch(`${ORACLE_URL}/prices`, { signal: AbortSignal.timeout(2000) })
       if (res.ok) {
-        const prices = await res.json() as Record<string, any>
+        const prices = await res.json() as OraclePriceMap
         currentPrice = prices[round.pair]?.price ?? round.open_price
       }
     } catch {}

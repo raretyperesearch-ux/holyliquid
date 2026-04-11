@@ -2,6 +2,8 @@ import { NextRequest } from 'next/server'
 import { ok, serverError } from '@/lib/auth'
 import { createServerSupabase } from '@/lib/supabase/server'
 
+const MVP_PAIR = process.env.HL_MVP_PAIR || 'ETH/USD'
+
 export async function GET(req: NextRequest) {
   try {
     const { searchParams } = new URL(req.url)
@@ -13,6 +15,7 @@ export async function GET(req: NextRequest) {
     const { data, error, count } = await sb
       .from('hl_rounds')
       .select('*', { count: 'exact' })
+      .eq('pair', MVP_PAIR)
       .in('status', ['settled', 'void'])
       .order('round_number', { ascending: false })
       .range(offset, offset + limit - 1)
