@@ -101,4 +101,54 @@ BEGIN
   RETURN v_balance;
 END;
 $$;
+
+-- Called before on-chain withdrawal send: atomically debits available balance.
+-- Returns new balance_usdc after debit.
+CREATE OR REPLACE FUNCTION hl_withdraw_debit(p_wallet text, p_amount numeric)
+RETURNS numeric
+LANGUAGE plpgsql
+AS $$
+DECLARE
+  v_balance numeric;
+BEGIN
+  UPDATE hl_balances
+  SET
+    balance_usdc = balance_usdc - p_amount,
+    updated_at   = now()
+  WHERE wallet = p_wallet
+  AND   balance_usdc - locked_usdc >= p_amount
+  RETURNING balance_usdc INTO v_balance;
+
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'insufficient_available_balance';
+  END IF;
+
+  RETURN v_balance;
+END;
+$$;
+
+-- Called when on-chain withdrawal fails: compensating refund.
+CREATE OR REPLACE FUNCTION hl_withdraw_refund(p_wallet text, p_amount numeric)
+RETURNS numeric
+LANGUAGE plpgsql
+AS $$
+DECLARE
+  v_balance numeric;
+BEGIN
+  UPDATE hl_balances
+  SET
+    balance_usdc = balance_usdc + p_amount,
+    updated_at   = now()
+  WHERE wallet = p_wallet
+  RETURNING balance_usdc INTO v_balance;
+
+  IF NOT FOUND THEN
+    INSERT INTO hl_balances (wallet, balance_usdc, locked_usdc)
+    VALUES (p_wallet, p_amount, 0)
+    RETURNING balance_usdc INTO v_balance;
+  END IF;
+
+  RETURN v_balance;
+END;
+$$;
 ```

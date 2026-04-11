@@ -2,6 +2,8 @@ import { NextRequest } from 'next/server'
 import { ok, serverError } from '@/lib/auth'
 
 const ORACLE_URL = process.env.ORACLE_SERVICE_URL || 'http://localhost:8000'
+const MVP_PAIR = process.env.HL_MVP_PAIR || 'ETH/USD'
+type OraclePriceMap = Record<string, { price?: number }>
 
 export async function GET(req: NextRequest) {
   try {
@@ -15,10 +17,11 @@ export async function GET(req: NextRequest) {
     const { createServerSupabase } = await import('@/lib/supabase/server')
     const sb = createServerSupabase()
 
-    // Get most recent non-void round
+    // MVP mode defaults to one pair; can be expanded by changing HL_MVP_PAIR.
     const { data: round, error } = await sb
       .from('hl_rounds')
       .select('*')
+      .eq('pair', MVP_PAIR)
       .in('status', ['open', 'locked', 'settling', 'settled'])
       .order('created_at', { ascending: false })
       .limit(1)
@@ -32,7 +35,7 @@ export async function GET(req: NextRequest) {
     try {
       const res = await fetch(`${ORACLE_URL}/prices`, { signal: AbortSignal.timeout(2000) })
       if (res.ok) {
-        const prices = await res.json() as Record<string, any>
+        const prices = await res.json() as OraclePriceMap
         currentPrice = prices[round.pair]?.price ?? round.open_price
       }
     } catch {}
