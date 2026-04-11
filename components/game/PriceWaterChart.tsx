@@ -132,15 +132,23 @@ export default function PriceWaterChart({ priceHistory, pnlPos }: Props) {
       if (smoothedPrices.length === 0) return H * 0.5
       const ratio = x / Math.max(1, W - 1)
       const idx = ratio * (smoothedPrices.length - 1)
-      // 5-point weighted average across the spatial axis for extra smoothness
-      // on top of the temporal EMA. Catches inter-sample aliasing.
-      let v = 0, wt = 0
-      for (let d = -2; d <= 2; d++) {
-        const i = Math.max(0, Math.min(smoothedPrices.length - 1, Math.round(idx + d)))
-        const w = 1 / (Math.abs(d) + 1)
-        v += smoothedPrices[i] * w; wt += w
-      }
-      v /= wt
+      const i1 = Math.max(0, Math.min(smoothedPrices.length - 1, Math.floor(idx)))
+      const i2 = Math.max(0, Math.min(smoothedPrices.length - 1, i1 + 1))
+      const i0 = Math.max(0, Math.min(smoothedPrices.length - 1, i1 - 1))
+      const i3 = Math.max(0, Math.min(smoothedPrices.length - 1, i2 + 1))
+      const t = idx - i1
+      const p0 = smoothedPrices[i0]
+      const p1 = smoothedPrices[i1]
+      const p2 = smoothedPrices[i2]
+      const p3 = smoothedPrices[i3]
+      const t2 = t * t
+      const t3 = t2 * t
+      const v = 0.5 * (
+        (2 * p1) +
+        (-p0 + p2) * t +
+        (2 * p0 - 5 * p1 + 4 * p2 - p3) * t2 +
+        (-p0 + 3 * p1 - 3 * p2 + p3) * t3
+      )
       // Normalize against the padded range centered on mid — calmer, premium feel.
       const normalized = (v - (smoothedMid - smoothedPaddedRange / 2)) / smoothedPaddedRange
       // Clamp defensively so a noisy single sample can't shoot off-screen.
@@ -150,15 +158,11 @@ export default function PriceWaterChart({ priceHistory, pnlPos }: Props) {
 
     function getY(x: number, chop: number, t: number, W: number, H: number): number {
       const b = getBaseY(x, W, H)
-      // Procedural chop dialed back ~45% vs the original. The water should
-      // whisper on top of the real price curve, not karate-kick over it.
+      // Main waterline should be the chart path first; motion is subtle physics.
       return b
-        + Math.sin(x * .016 + t * 1.9) * 1.6 * chop
-        + Math.sin(x * .028 - t * 1.4) * 0.95 * chop
-        + Math.sin(x * .055 + t * 2.8) * 0.5
-        + Math.sin(x * .09  - t * 3.5) * 0.28 * chop
-        + Math.sin(x * .15  + t * 5)   * 0.14
-        + Math.sin(x * .24  - t * 6.5) * 0.08 * chop
+        + Math.sin(x * .02 + t * 1.6) * 0.55 * chop
+        + Math.sin(x * .038 - t * 1.25) * 0.35 * chop
+        + Math.sin(x * .08 + t * 2.2) * 0.14
     }
 
     function drawCloud(ctx: CanvasRenderingContext2D, cx: number, cy: number, cw: number, ch: number, alpha: number, blend: number) {
@@ -192,7 +196,7 @@ export default function PriceWaterChart({ priceHistory, pnlPos }: Props) {
       const targetBlend = st.pnlPos ? 1 : 0
       st.pnlBlend = lerp(st.pnlBlend, targetBlend, .025)
       const B = st.pnlBlend
-      const chop = lerp(1.85, 1, B)
+      const chop = lerp(1, 0.78, B)
 
       const { width: W, height: H, dpr } = sizeRef.current
       if (!W || !H) return  // not sized yet
@@ -222,7 +226,9 @@ export default function PriceWaterChart({ priceHistory, pnlPos }: Props) {
       refreshSmoothedPrices(prices)
 
       const s: number[] = []
-      for (let x = 0; x < W; x++) s.push(getY(x, chop, t, W, H))
+      for (let x = 0; x < W; x++) {
+        s.push(getY(x, chop, t, W, H))
+      }
       const skyH = s[0] + 8
       const rn = (n: number) => Math.round(n)
 
@@ -374,6 +380,32 @@ export default function PriceWaterChart({ priceHistory, pnlPos }: Props) {
         shimG.addColorStop(i/18,B>.5?`rgba(200,235,255,${sh})`:`rgba(130,155,210,${sh})`)
       }
       ctx2.fillStyle=shimG; ctx2.fill()
+
+      // Right-edge live price marker follows the main waterline.
+      const markerX = W - 6
+      const markerY = s[Math.max(0, W - 1)]
+      const livePrice = prices.length ? prices[prices.length - 1] : null
+      const livePriceTxt = livePrice !== null && Number.isFinite(livePrice)
+        ? '$' + livePrice.toLocaleString('en-US', { maximumFractionDigits: livePrice > 1000 ? 0 : 2 })
+        : '--'
+      ctx2.beginPath()
+      ctx2.arc(markerX, markerY, 2.7, 0, Math.PI * 2)
+      ctx2.fillStyle = B > .5 ? 'rgba(205,238,255,.95)' : 'rgba(188,205,255,.95)'
+      ctx2.fill()
+      const badgeW = Math.max(48, livePriceTxt.length * 6.1 + 8)
+      const badgeX = markerX - badgeW - 10
+      const badgeY = markerY - 8
+      ctx2.fillStyle = 'rgba(8,12,26,.72)'
+      ctx2.strokeStyle = B > .5 ? 'rgba(186,228,255,.45)' : 'rgba(166,178,255,.42)'
+      ctx2.lineWidth = 0.7
+      ctx2.beginPath()
+      ctx2.roundRect(badgeX, badgeY, badgeW, 14, 7)
+      ctx2.fill()
+      ctx2.stroke()
+      ctx2.fillStyle = B > .5 ? 'rgba(214,245,255,.95)' : 'rgba(209,218,255,.94)'
+      ctx2.font = '600 8.5px system-ui, sans-serif'
+      ctx2.textBaseline = 'middle'
+      ctx2.fillText(livePriceTxt, badgeX + 5, badgeY + 7)
 
       // FOAM — thin arc streaks (no circles)
       for(let x=3;x<W-3;x+=3){
