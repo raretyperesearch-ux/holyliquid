@@ -80,18 +80,6 @@ async function runOneRound(): Promise<void> {
 
   const pools = await db.rounds.getPools(round.id)
 
-  if (pools.pos_pool === 0 && pools.neg_pool === 0) {
-    clearInterval(tickInterval)
-    await voidRound(round.id, 'no_bets')
-    return
-  }
-
-  if (pools.pos_pool === 0 || pools.neg_pool === 0) {
-    clearInterval(tickInterval)
-    await voidRound(round.id, 'one_sided_pool')
-    return
-  }
-
   await db.rounds.update(round.id, { status: 'locked', locked_at: new Date() })
   await broadcast.roundState({ ...round, status: 'locked' })
   console.log(`[Loop] Round #${roundNumber} LOCKED | pos: $${pools.pos_pool} | neg: $${pools.neg_pool}`)
