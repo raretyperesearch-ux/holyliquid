@@ -93,38 +93,50 @@ function LastResultBanner({
   const canRebet = lastBetAmount != null && lastBetAmount > 0 && !isVoid
 
   return (
-    <div className={`runback runback--${variant}`} role="status">
-      <button className="runback__close" onClick={onDismiss} aria-label="Dismiss">
-        ×
-      </button>
+    <div className="runback" role="status">
+      <div className={`runback__card runback__card--${variant}`}>
+        <div className="runback__border" aria-hidden />
+        <div className="runback__shine" aria-hidden />
+        {isWin && (
+          <>
+            <div className="runback__sparkles" aria-hidden />
+            <div className="runback__confetti" aria-hidden />
+          </>
+        )}
+        <button className="runback__close" onClick={onDismiss} aria-label="Dismiss">
+          ×
+        </button>
 
-      <div className="runback__head">
-        <div className="runback__headline">{headline}</div>
-        <div className="runback__sub">{subline}</div>
+        <div className="runback__head">
+          <div className="runback__headline" data-text={headline}>{headline}</div>
+          <div className="runback__sub">{subline}</div>
+        </div>
+
+        {canRebet && (
+          <>
+            <div className="runback__divider" />
+            <div className="runback__label">⚡ RUN IT BACK · ${lastBetAmount!.toFixed(2)} ⚡</div>
+            <div className="runback__btns">
+              <button
+                className="runback__btn runback__btn--pos"
+                onClick={() => { onRebet('pos', lastBetAmount!); onDismiss() }}
+              >
+                <span className="runback__btn-glow" aria-hidden />
+                <span className="runback__btn-label">+PNL</span>
+                <span className="runback__btn-amt">${lastBetAmount!.toFixed(2)}</span>
+              </button>
+              <button
+                className="runback__btn runback__btn--neg"
+                onClick={() => { onRebet('neg', lastBetAmount!); onDismiss() }}
+              >
+                <span className="runback__btn-glow" aria-hidden />
+                <span className="runback__btn-label">−PNL</span>
+                <span className="runback__btn-amt">${lastBetAmount!.toFixed(2)}</span>
+              </button>
+            </div>
+          </>
+        )}
       </div>
-
-      {canRebet && (
-        <>
-          <div className="runback__divider" />
-          <div className="runback__label">RUN IT BACK · ${lastBetAmount!.toFixed(2)}</div>
-          <div className="runback__btns">
-            <button
-              className="runback__btn runback__btn--pos"
-              onClick={() => { onRebet('pos', lastBetAmount!); onDismiss() }}
-            >
-              <span className="runback__btn-label">+PNL</span>
-              <span className="runback__btn-amt">${lastBetAmount!.toFixed(2)}</span>
-            </button>
-            <button
-              className="runback__btn runback__btn--neg"
-              onClick={() => { onRebet('neg', lastBetAmount!); onDismiss() }}
-            >
-              <span className="runback__btn-label">−PNL</span>
-              <span className="runback__btn-amt">${lastBetAmount!.toFixed(2)}</span>
-            </button>
-          </div>
-        </>
-      )}
     </div>
   )
 }
