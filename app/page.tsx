@@ -61,108 +61,70 @@ type HistoryRound = {
 
 function LastResultBanner({
   result,
-  onClose,
-  onRunItBack,
-  canRebet,
+  lastBetAmount,
+  onRebet,
+  onDismiss,
 }: {
-  result: {
-    outcome: 'win' | 'loss' | 'void'
-    bet_amount: number
-    winnings: number
-    round_number: number
-    bet_side: 'pos' | 'neg' | null
-    void_reason: string | null
-  } | null
-  onClose: () => void
-  onRunItBack?: () => void
-  canRebet: boolean
+  result: { outcome: '+PNL' | '-PNL' | 'LIQUIDATED' | 'VOID'; pnlPct?: number; pnlUsd?: number; winnings?: number } | null
+  lastBetAmount: number | null
+  onRebet: (side: 'pos' | 'neg', amount: number) => void
+  onDismiss: () => void
 }) {
-  useEffect(() => {
-    if (!result) return
-    const t = setTimeout(onClose, 6000)
-    return () => clearTimeout(t)
-  }, [result, onClose])
-
   if (!result) return null
 
-  const isWin  = result.outcome === 'win'
-  const isVoid = result.outcome === 'void'
-  const title  = isWin ? 'YOU WON' : isVoid ? 'VOIDED' : 'YOU LOST'
-  const color  = isWin ? '#7df2a8' : isVoid ? '#9aa6c4' : '#ff7c98'
-  const profit = isWin ? result.winnings - result.bet_amount : 0
+  const isWin  = result.outcome === '+PNL'
+  const isLoss = result.outcome === '-PNL'
+  const isLiq  = result.outcome === 'LIQUIDATED'
+  const isVoid = result.outcome === 'VOID'
+
+  const headline = isWin
+    ? `WON $${(result.winnings ?? 0).toFixed(2)}`
+    : isLoss
+    ? `LOST $${(lastBetAmount ?? 0).toFixed(2)}`
+    : isLiq
+    ? `LIQUIDATED`
+    : `VOIDED`
+
+  const subline = isVoid
+    ? 'Round refunded'
+    : `${(result.pnlPct ?? 0) > 0 ? '+' : ''}${(result.pnlPct ?? 0).toFixed(2)}%`
+
+  const variant = isWin ? 'win' : isLiq ? 'liq' : isLoss ? 'loss' : 'void'
+  const canRebet = lastBetAmount != null && lastBetAmount > 0 && !isVoid
 
   return (
-    <div
-      role="status"
-      aria-live="polite"
-      style={{
-        position: 'fixed',
-        top: '50%',
-        left: '50%',
-        transform: 'translate(-50%, -50%)',
-        background: 'rgba(8, 12, 24, 0.94)',
-        border: `2px solid ${color}`,
-        borderRadius: 18,
-        padding: '28px 44px 24px',
-        textAlign: 'center',
-        boxShadow: `0 0 80px ${color}66`,
-        zIndex: 9999,
-        pointerEvents: 'auto',
-        backdropFilter: 'blur(10px)',
-        minWidth: 280,
-      }}
-    >
-      <div style={{ fontSize: 11, color: '#9aa6c4', letterSpacing: 2, fontWeight: 600 }}>
-        ROUND #{result.round_number}
+    <div className={`runback runback--${variant}`} role="status">
+      <button className="runback__close" onClick={onDismiss} aria-label="Dismiss">
+        ×
+      </button>
+
+      <div className="runback__head">
+        <div className="runback__headline">{headline}</div>
+        <div className="runback__sub">{subline}</div>
       </div>
-      <div style={{ fontSize: 38, fontWeight: 800, color, margin: '8px 0 4px', letterSpacing: 1 }}>
-        {title}
-      </div>
-      <div style={{ fontSize: 17, color: '#e9edf7', marginBottom: 18 }}>
-        {isWin
-          ? `+$${profit.toFixed(2)} profit · $${result.winnings.toFixed(2)} returned`
-          : isVoid
-          ? `$${result.bet_amount.toFixed(2)} refunded${result.void_reason === 'one_sided_pool' ? ' · no opponent' : ''}`
-          : `−$${result.bet_amount.toFixed(2)}`}
-      </div>
-      <div style={{ display: 'flex', gap: 10, justifyContent: 'center' }}>
-        {canRebet && onRunItBack && (
-          <button
-            type="button"
-            onClick={() => { onRunItBack(); onClose() }}
-            style={{
-              background: color,
-              color: '#0a0e1c',
-              border: 'none',
-              borderRadius: 10,
-              padding: '11px 22px',
-              fontWeight: 800,
-              fontSize: 14,
-              cursor: 'pointer',
-              letterSpacing: 0.5,
-              boxShadow: `0 4px 18px ${color}55`,
-            }}
-          >
-            RUN IT BACK · ${result.bet_amount.toFixed(0)}{result.bet_side === 'pos' ? ' +PNL' : result.bet_side === 'neg' ? ' −PNL' : ''}
-          </button>
-        )}
-        <button
-          type="button"
-          onClick={onClose}
-          style={{
-            background: 'transparent',
-            color: '#9aa6c4',
-            border: '1px solid #2a3554',
-            borderRadius: 10,
-            padding: '11px 18px',
-            fontWeight: 600,
-            fontSize: 13,
-            cursor: 'pointer',
-          }}
-        >
-          DISMISS
-        </button>
-      </div>
+
+      {canRebet && (
+        <>
+          <div className="runback__divider" />
+          <div className="runback__label">RUN IT BACK · ${lastBetAmount!.toFixed(2)}</div>
+          <div className="runback__btns">
+            <button
+              className="runback__btn runback__btn--pos"
+              onClick={() => { onRebet('pos', lastBetAmount!); onDismiss() }}
+            >
+              <span className="runback__btn-label">+PNL</span>
+              <span className="runback__btn-amt">${lastBetAmount!.toFixed(2)}</span>
+            </button>
+            <button
+              className="runback__btn runback__btn--neg"
+              onClick={() => { onRebet('neg', lastBetAmount!); onDismiss() }}
+            >
+              <span className="runback__btn-label">−PNL</span>
+              <span className="runback__btn-amt">${lastBetAmount!.toFixed(2)}</span>
+            </button>
+          </div>
+        </>
+      )}
     </div>
   )
 }
@@ -419,18 +381,6 @@ export default function HolyLiquid() {
     if (!selectedSide) { playSfx('invalid'); return showToast('Select a side first', '#ff7c98') }
     return placeBetWith(selectedSide, selectedChip)
   }
-
-  // One-click rebet of the last successful bet on the current open round.
-  const runItBack = useCallback(() => {
-    sounds.click()
-    const last = lastBetRef.current
-    if (!last) return
-    if (!round || round.status !== 'open') {
-      showToast('Wait for next round to open', '#9aa6c4')
-      return
-    }
-    placeBetWith(last.side, last.amount)
-  }, [round, placeBetWith])
 
   // Fetch treasury wallet once on first mount so the deposit modal has it ready
   useEffect(() => {
@@ -1357,10 +1307,37 @@ export default function HolyLiquid() {
       )}
 
       <LastResultBanner
-        result={lastResult}
-        onClose={clearLastResult}
-        onRunItBack={runItBack}
-        canRebet={!!round && round.status === 'open' && (balance ?? 0) >= (lastResult?.bet_amount ?? 0)}
+        result={(() => {
+          if (!lastResult) return null
+          // Map user-level outcome (win/loss/void) onto the banner's vocabulary.
+          // - wins always show the celebratory +PNL variant
+          // - losses show LIQUIDATED (dramatic red) when the round liquidated, else -PNL
+          // - void rounds show VOID
+          if (lastResult.outcome === 'void') {
+            return { outcome: 'VOID' as const, winnings: 0, pnlPct: 0 }
+          }
+          if (lastResult.outcome === 'win') {
+            const profit = lastResult.winnings - lastResult.bet_amount
+            const pnlPct = lastResult.bet_amount > 0 ? (profit / lastResult.bet_amount) * 100 : 0
+            return { outcome: '+PNL' as const, winnings: lastResult.winnings, pnlPct }
+          }
+          // outcome === 'loss'
+          const isLiq = lastResult.result_label === 'LIQUIDATED'
+          return {
+            outcome: isLiq ? ('LIQUIDATED' as const) : ('-PNL' as const),
+            winnings: 0,
+            pnlPct: -100,
+          }
+        })()}
+        lastBetAmount={lastBetRef.current?.amount ?? lastResult?.bet_amount ?? null}
+        onRebet={(side, amount) => {
+          if (!round || round.status !== 'open') {
+            showToast('Wait for next round to open', '#9aa6c4')
+            return
+          }
+          placeBetWith(side, amount)
+        }}
+        onDismiss={clearLastResult}
       />
     </div>
   )
