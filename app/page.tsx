@@ -25,6 +25,26 @@ function fmt(n: number) {
   return n.toLocaleString('en-US', { maximumFractionDigits: 2 })
 }
 
+function heroFontSize(valueText: string): string {
+  const digits = valueText.replace(/[^0-9]/g, '').length
+  if (digits >= 14) return '24px'
+  if (digits >= 13) return '26px'
+  if (digits >= 12) return '29px'
+  if (digits >= 11) return '32px'
+  if (digits >= 10) return '36px'
+  if (digits >= 9) return '40px'
+  if (digits >= 8) return '45px'
+  return '52px'
+}
+
+function pnlFontSize(valueText: string): string {
+  const digits = valueText.replace(/[^0-9]/g, '').length
+  if (digits >= 10) return '11px'
+  if (digits >= 9) return '12px'
+  if (digits >= 8) return '13px'
+  return '15px'
+}
+
 type ModalKind = null | 'deposit' | 'withdraw'
 type HistoryRound = {
   round_number: number
@@ -670,6 +690,7 @@ export default function HolyLiquid() {
               <button className="acct-btn withdraw" onClick={openWithdraw}>Cash Out</button>
             </div>
           )}
+          <div className="hdr-util-dot" aria-hidden />
         </div>
 
         <div className="stats-row">
