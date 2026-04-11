@@ -192,7 +192,6 @@ export default function HolyLiquid() {
       if (json.success) {
         showToast(`Bet placed · $${selectedChip} on ${selectedSide === 'pos' ? '+PNL' : '−PNL'}`, '#7df2a8')
         setBalance(json.data.balance_usdc)
-        setSelectedSide(null)
         refetch()
       } else {
         playSfx('invalid')
@@ -443,6 +442,20 @@ export default function HolyLiquid() {
   const posShare = totalPool > 0 ? (Number(round?.pos_pool ?? 0) / totalPool) * 100 : 50
   const negShare = 100 - posShare
   const crowdLean = posShare === negShare ? 'Balanced' : posShare > negShare ? 'Crowd leaning +PNL' : 'Crowd leaning −PNL'
+  const recentSettled = recentRounds.filter(r => r.result === 'pos' || r.result === 'neg' || r.result === 'void')
+  const streak = (() => {
+    const first = recentSettled[0]?.result
+    if (!first || first === 'void') return null
+    let len = 1
+    for (let i = 1; i < recentSettled.length; i++) {
+      if (recentSettled[i].result !== first) break
+      len += 1
+    }
+    return { side: first, len }
+  })()
+  const lastSettledLabel = recentSettled[0]?.settled_at
+    ? `${Math.max(0, Math.round((Date.now() - new Date(recentSettled[0].settled_at as string).getTime()) / 1000))}s ago`
+    : 'live'
 
   return (
     <div className="hl-root">
@@ -665,6 +678,12 @@ export default function HolyLiquid() {
           <div className="history-hdr">
             <span>Market Activity</span>
             <span className="history-dot">Recent Settles</span>
+          </div>
+          <div className="history-meta">
+            <span className={`streak-tag ${streak?.side === 'pos' ? 'pos' : streak?.side === 'neg' ? 'neg' : ''}`}>
+              {streak ? `${streak.side === 'pos' ? '+PNL' : '−PNL'} streak ×${streak.len}` : 'No active streak'}
+            </span>
+            <span className="settled-tag">Last settle {lastSettledLabel}</span>
           </div>
           <div className="history-tape">
             {(recentRounds.length ? recentRounds : [{ round_number: 0, result: null, pnl_pct: null, settled_at: null }]).map((r, i) => {
