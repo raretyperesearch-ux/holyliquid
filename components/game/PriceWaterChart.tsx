@@ -177,33 +177,6 @@ export default function PriceWaterChart({ priceHistory, pnlPos }: Props) {
         + Math.sin(x * .08 + t * 2.2) * 0.14
     }
 
-    function getAssetY(x: number, t: number, W: number, H: number): number {
-      if (rawPrices.length === 0) return getBaseY(x, W, H)
-      const ratio = x / Math.max(1, W - 1)
-      const idx = ratio * (rawPrices.length - 1)
-      const i1 = Math.max(0, Math.min(rawPrices.length - 1, Math.floor(idx)))
-      const i2 = Math.max(0, Math.min(rawPrices.length - 1, i1 + 1))
-      const i0 = Math.max(0, Math.min(rawPrices.length - 1, i1 - 1))
-      const i3 = Math.max(0, Math.min(rawPrices.length - 1, i2 + 1))
-      const u = idx - i1
-      const u2 = u * u
-      const u3 = u2 * u
-      const p0 = rawPrices[i0]
-      const p1 = rawPrices[i1]
-      const p2 = rawPrices[i2]
-      const p3 = rawPrices[i3]
-      const v = 0.5 * (
-        (2 * p1) +
-        (-p0 + p2) * u +
-        (2 * p0 - 5 * p1 + 4 * p2 - p3) * u2 +
-        (-p0 + 3 * p1 - 3 * p2 + p3) * u3
-      )
-      const normalized = (v - (rawMid - rawPaddedRange / 2)) / rawPaddedRange
-      const clamped = Math.max(0, Math.min(1, normalized))
-      const rawY = H * 0.08 + (H * 0.66) - clamped * (H * 0.66)
-      return rawY - 2 + Math.sin(x * .014 + t) * 0.35
-    }
-
     function drawCloud(ctx: CanvasRenderingContext2D, cx: number, cy: number, cw: number, ch: number, alpha: number, blend: number) {
       if (blend < .03) return
       ctx.save(); ctx.globalAlpha = alpha * blend
@@ -265,10 +238,8 @@ export default function PriceWaterChart({ priceHistory, pnlPos }: Props) {
       refreshSmoothedPrices(prices)
 
       const s: number[] = []
-      const assetLine: number[] = []
       for (let x = 0; x < W; x++) {
         s.push(getY(x, chop, t, W, H))
-        assetLine.push(getAssetY(x, t, W, H))
       }
       const skyH = s[0] + 8
       const rn = (n: number) => Math.round(n)
@@ -421,17 +392,6 @@ export default function PriceWaterChart({ priceHistory, pnlPos }: Props) {
         shimG.addColorStop(i/18,B>.5?`rgba(200,235,255,${sh})`:`rgba(130,155,210,${sh})`)
       }
       ctx2.fillStyle=shimG; ctx2.fill()
-
-      // Faint secondary asset line above/within the main waterline.
-      ctx2.beginPath()
-      ctx2.moveTo(0, assetLine[0])
-      for (let x = 1; x < W; x++) ctx2.lineTo(x, assetLine[x])
-      ctx2.strokeStyle = B > .5 ? 'rgba(198,240,255,.28)' : 'rgba(165,190,235,.32)'
-      ctx2.lineWidth = 1.25
-      ctx2.shadowColor = B > .5 ? 'rgba(155,220,255,.25)' : 'rgba(150,180,255,.22)'
-      ctx2.shadowBlur = 4
-      ctx2.stroke()
-      ctx2.shadowBlur = 0
 
       // Right-edge live price marker follows the main waterline.
       const markerX = W - 6
