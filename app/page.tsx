@@ -59,19 +59,24 @@ type HistoryRound = {
 function LastResultBanner({
   result,
   onClose,
+  onRunItBack,
+  canRebet,
 }: {
   result: {
     outcome: 'win' | 'loss' | 'void'
     bet_amount: number
     winnings: number
     round_number: number
+    bet_side: 'pos' | 'neg' | null
     void_reason: string | null
   } | null
   onClose: () => void
+  onRunItBack?: () => void
+  canRebet: boolean
 }) {
   useEffect(() => {
     if (!result) return
-    const t = setTimeout(onClose, 4500)
+    const t = setTimeout(onClose, 6000)
     return () => clearTimeout(t)
   }, [result, onClose])
 
@@ -87,36 +92,73 @@ function LastResultBanner({
     <div
       role="status"
       aria-live="polite"
-      onClick={onClose}
       style={{
         position: 'fixed',
         top: '50%',
         left: '50%',
         transform: 'translate(-50%, -50%)',
-        background: 'rgba(8, 12, 24, 0.92)',
+        background: 'rgba(8, 12, 24, 0.94)',
         border: `2px solid ${color}`,
-        borderRadius: 16,
-        padding: '28px 44px',
+        borderRadius: 18,
+        padding: '28px 44px 24px',
         textAlign: 'center',
-        boxShadow: `0 0 60px ${color}55`,
+        boxShadow: `0 0 80px ${color}66`,
         zIndex: 9999,
         pointerEvents: 'auto',
-        cursor: 'pointer',
-        backdropFilter: 'blur(8px)',
+        backdropFilter: 'blur(10px)',
+        minWidth: 280,
       }}
     >
-      <div style={{ fontSize: 12, color: '#9aa6c4', letterSpacing: 2 }}>
+      <div style={{ fontSize: 11, color: '#9aa6c4', letterSpacing: 2, fontWeight: 600 }}>
         ROUND #{result.round_number}
       </div>
-      <div style={{ fontSize: 36, fontWeight: 800, color, margin: '6px 0' }}>
+      <div style={{ fontSize: 38, fontWeight: 800, color, margin: '8px 0 4px', letterSpacing: 1 }}>
         {title}
       </div>
-      <div style={{ fontSize: 18, color: '#e9edf7' }}>
+      <div style={{ fontSize: 17, color: '#e9edf7', marginBottom: 18 }}>
         {isWin
           ? `+$${profit.toFixed(2)} profit · $${result.winnings.toFixed(2)} returned`
           : isVoid
           ? `$${result.bet_amount.toFixed(2)} refunded${result.void_reason === 'one_sided_pool' ? ' · no opponent' : ''}`
           : `−$${result.bet_amount.toFixed(2)}`}
+      </div>
+      <div style={{ display: 'flex', gap: 10, justifyContent: 'center' }}>
+        {canRebet && onRunItBack && (
+          <button
+            type="button"
+            onClick={() => { onRunItBack(); onClose() }}
+            style={{
+              background: color,
+              color: '#0a0e1c',
+              border: 'none',
+              borderRadius: 10,
+              padding: '11px 22px',
+              fontWeight: 800,
+              fontSize: 14,
+              cursor: 'pointer',
+              letterSpacing: 0.5,
+              boxShadow: `0 4px 18px ${color}55`,
+            }}
+          >
+            RUN IT BACK · ${result.bet_amount.toFixed(0)}{result.bet_side === 'pos' ? ' +PNL' : result.bet_side === 'neg' ? ' −PNL' : ''}
+          </button>
+        )}
+        <button
+          type="button"
+          onClick={onClose}
+          style={{
+            background: 'transparent',
+            color: '#9aa6c4',
+            border: '1px solid #2a3554',
+            borderRadius: 10,
+            padding: '11px 18px',
+            fontWeight: 600,
+            fontSize: 13,
+            cursor: 'pointer',
+          }}
+        >
+          DISMISS
+        </button>
       </div>
     </div>
   )
@@ -127,6 +169,7 @@ export default function HolyLiquid() {
   const [accessToken, setAccessToken] = useState<string | null>(null)
   const [balance, setBalance] = useState<number | null>(null)
   const fetchBalanceRef = useRef<() => Promise<void>>(async () => {})
+  const lastBetRef = useRef<{ side: 'pos' | 'neg'; amount: number } | null>(null)
   const [selectedChip, setSelectedChip] = useState(10)
   const [selectedSide, setSelectedSide] = useState<'pos' | 'neg' | null>(null)
   const [betting, setBetting] = useState(false)
@@ -315,11 +358,12 @@ export default function HolyLiquid() {
     }
   }, [ensureAudio])
 
-  async function placeBet() {
+  // Internal: place a bet with explicit side and chip values.
+  // Used by both the normal Bet button and the "Run it back" rebet flow.
+  const placeBetWith = useCallback(async (side: 'pos' | 'neg', chip: number) => {
     if (!accessToken || !round) return
-    if (!selectedSide) { playSfx('invalid'); return showToast('Select a side first', '#ff7c98') }
-    if (countdown.lock <= 0) { playSfx('invalid'); return showToast('Betting is closed', '#ff7c98') }
-    if (balance !== null && selectedChip > balance) { playSfx('invalid'); return showToast('Insufficient balance', '#ff7c98') }
+    if (countdown.lock <= 0) { playSfx('invalid'); showToast('Betting is closed', '#ff7c98'); return }
+    if (balance !== null && chip > balance) { playSfx('invalid'); showToast('Insufficient balance', '#ff7c98'); return }
     playSfx('confirm')
     setBetting(true)
     try {
@@ -327,22 +371,43 @@ export default function HolyLiquid() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${accessToken}` },
         body: JSON.stringify({
-          round_id: round.id, side: selectedSide, amount: selectedChip,
+          round_id: round.id, side, amount: chip,
           idempotency_key: crypto.randomUUID(),
         }),
       })
       const json = await res.json()
       if (json.success) {
-        showToast(`Bet placed · $${selectedChip} on ${selectedSide === 'pos' ? '+PNL' : '−PNL'}`, '#7df2a8')
+        showToast(`Bet placed · $${chip} on ${side === 'pos' ? '+PNL' : '−PNL'}`, '#7df2a8')
         setBalance(json.data.balance_usdc)
+        lastBetRef.current = { side, amount: chip }
         refetch()
       } else {
         playSfx('invalid')
         showToast(json.error || 'Bet failed', '#ff7c98')
       }
-    } catch { playSfx('invalid'); showToast('Network error', '#ff7c98') }
-    finally { setBetting(false) }
+    } catch {
+      playSfx('invalid')
+      showToast('Network error', '#ff7c98')
+    } finally {
+      setBetting(false)
+    }
+  }, [accessToken, round, countdown.lock, balance, playSfx, refetch])
+
+  async function placeBet() {
+    if (!selectedSide) { playSfx('invalid'); return showToast('Select a side first', '#ff7c98') }
+    return placeBetWith(selectedSide, selectedChip)
   }
+
+  // One-click rebet of the last successful bet on the current open round.
+  const runItBack = useCallback(() => {
+    const last = lastBetRef.current
+    if (!last) return
+    if (!round || round.status !== 'open') {
+      showToast('Wait for next round to open', '#9aa6c4')
+      return
+    }
+    placeBetWith(last.side, last.amount)
+  }, [round, placeBetWith])
 
   // Fetch treasury wallet once on first mount so the deposit modal has it ready
   useEffect(() => {
@@ -1193,7 +1258,12 @@ export default function HolyLiquid() {
         </div>
       )}
 
-      <LastResultBanner result={lastResult} onClose={clearLastResult} />
+      <LastResultBanner
+        result={lastResult}
+        onClose={clearLastResult}
+        onRunItBack={runItBack}
+        canRebet={!!round && round.status === 'open' && (balance ?? 0) >= (lastResult?.bet_amount ?? 0)}
+      />
     </div>
   )
 }

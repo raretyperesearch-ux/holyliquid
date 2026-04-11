@@ -26,6 +26,36 @@ export async function GET(
     const posBets = (bets || []).filter(b => b.side === 'pos')
     const negBets = (bets || []).filter(b => b.side === 'neg')
 
+    // Optional auth — if a Bearer token is present, also return my_bet
+    let myBet: {
+      side: 'pos' | 'neg'
+      amount: number
+      won: boolean | null
+      outcome: string | null
+      winnings: number
+    } | null = null
+    try {
+      const { verifyAuth } = await import('@/lib/auth')
+      const wallet = await verifyAuth(req)
+      const { data: bet } = await sb
+        .from('hl_bets')
+        .select('side, amount, won, outcome, winnings')
+        .eq('round_id', id)
+        .eq('wallet', wallet)
+        .single()
+      if (bet) {
+        myBet = {
+          side:    bet.side as 'pos' | 'neg',
+          amount:  Number(bet.amount) || 0,
+          won:     bet.won,
+          outcome: bet.outcome,
+          winnings: Number(bet.winnings) || 0,
+        }
+      }
+    } catch {
+      // No auth or auth failed — that's fine, my_bet stays null
+    }
+
     return ok({
       round: {
         ...round,
@@ -42,6 +72,7 @@ export async function GET(
         pos_count: posBets.length,
         neg_count: negBets.length,
       },
+      my_bet: myBet,
     })
   } catch (e) {
     return serverError(e)
