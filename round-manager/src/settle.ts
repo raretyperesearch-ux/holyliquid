@@ -3,7 +3,7 @@ import { db } from './db'
 import { broadcast } from './broadcast'
 import { voidRound } from './void'
 
-const PLATFORM_FEE = 0.05
+const PLATFORM_FEE = 0.07
 
 export function calculateResult(position: Round, openPrice: number, closePrice: number): RoundResult {
   const priceChange = (closePrice - openPrice) / openPrice
@@ -52,10 +52,11 @@ export async function settleRound(
   const winningBets = bets.filter(b => b.side === result.winningSide)
   const losingBets  = bets.filter(b => b.side !== result.winningSide)
 
-  const losingPool  = result.winningSide === 'pos' ? negPool : posPool
-  const winningPool = result.winningSide === 'pos' ? posPool : negPool
-  const fee         = losingPool * PLATFORM_FEE
-  const prize       = losingPool * (1 - PLATFORM_FEE)
+  const winningPool     = result.winningSide === 'pos' ? posPool : negPool
+  const totalPool       = posPool + negPool
+  const fee             = totalPool * PLATFORM_FEE
+  const distributable   = totalPool - fee
+  const prize           = distributable - winningPool  // what's left after returning winning stakes
 
   const payouts = winningBets.map(bet => ({
     ...bet,

@@ -1152,3 +1152,34 @@ html, body, #__next { width: 100%; min-height: 100%; }
 .sound-toggle:active {
   transform: scale(0.92);
 }
+
+/* ── WITHDRAW FEE PREVIEW ────────────────────────────────── */
+.withdraw-preview {
+  margin: 12px 0 6px;
+  padding: 12px 14px;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.wp-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 12px;
+}
+.wp-label {
+  color: rgba(255, 255, 255, 0.55);
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+.wp-value {
+  font-weight: 800;
+  font-feature-settings: "tnum";
+  color: rgba(255, 255, 255, 0.85);
+}
+.wp-value--green {
+  color: #7df2a8;
+}
