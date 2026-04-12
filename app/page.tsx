@@ -807,7 +807,7 @@ export default function HolyLiquid() {
           {!ready ? (
             <div className="isl account-isl skeleton-account" />
           ) : !authenticated ? (
-            <button className="isl connect-pill" ref={(el) => { accountGuideRef.current = el }} onClick={() => { sounds.click(); login() }}>Connect</button>
+            <button className="isl connect-pill" ref={(el) => { accountGuideRef.current = el }} onClick={() => { sounds.click(); login() }}>Login to play</button>
           ) : (
             <div className="isl account-isl account-center" ref={(el) => { accountGuideRef.current = el }}>
               <button className="acct-btn deposit" onClick={() => { sounds.click(); openDeposit() }}>Deposit</button>
@@ -909,7 +909,7 @@ export default function HolyLiquid() {
         {/* BET PANEL */}
         {!authenticated ? (
           <button className="cfm-isl rdy" onClick={login} style={{ letterSpacing: '.2em' }}>
-            Connect to Play
+            Login to play
           </button>
         ) : phase === 'settled' && myBet ? (
           settleResolved ? (
