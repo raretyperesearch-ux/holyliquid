@@ -25,7 +25,9 @@ export default function Providers({ children }: { children: React.ReactNode }) {
         defaultChain: base,
         supportedChains: [base],
         embeddedWallets: {
-          createOnLogin: 'users-without-wallets',
+          ethereum: {
+            createOnLogin: 'users-without-wallets',
+          },
         },
       }}
     >
