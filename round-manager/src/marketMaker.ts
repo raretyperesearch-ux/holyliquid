@@ -124,17 +124,23 @@ export function scheduleMarketMakerBets(round: Round): void {
     return
   }
 
+  console.log(`[MM] Round #${round.round_number}: scheduling phases (seed@${SEED_DELAY_MS}ms, balance@${BALANCE_DELAY_MS}ms, rescue@${RESCUE_DELAY_MS}ms)`)
+
   // ── PHASE 1: SEED ──────────────────────────────────────────
-  // At 2s, if no bets have landed yet, drop a $1 on a random side so the
-  // pool has something to balance against.
+  // At 2s, ALWAYS drop a $1 on the minority side (or random if equal).
+  // Unconditional so every round has at least one visible MM bet.
   setTimeout(async () => {
     try {
       const state = await readRound(round.id)
       if (!state.open) return
-      // Don't step on a human — if someone already bet, let the balance phase handle it
-      if (state.pos + state.neg > 0) return
-      const side: 'pos' | 'neg' = Math.random() < 0.5 ? 'pos' : 'neg'
-      await placeMmBet(round, side, SEED_AMOUNT, 'seed', '')
+      let side: 'pos' | 'neg'
+      if (state.pos === state.neg) {
+        side = Math.random() < 0.5 ? 'pos' : 'neg'
+      } else {
+        // Already lopsided — push toward minority
+        side = state.pos < state.neg ? 'pos' : 'neg'
+      }
+      await placeMmBet(round, side, SEED_AMOUNT, 'seed', ` pos=$${state.pos} neg=$${state.neg}`)
     } catch (e: any) {
       console.warn('[MM] seed phase error:', e?.message || e)
     }
