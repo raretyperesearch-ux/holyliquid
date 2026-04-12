@@ -2,6 +2,7 @@ import { NextRequest } from 'next/server'
 import { verifyAuth, ok, badRequest, serverError } from '@/lib/auth'
 import { createServerSupabase } from '@/lib/supabase/server'
 import { deriveDepositAddress } from '@/lib/server/hdWallet'
+import { addAddressToAlchemyWebhook } from '@/lib/server/alchemyWebhook'
 
 /**
  * GET /api/deposit/address
@@ -59,6 +60,15 @@ export async function GET(req: NextRequest) {
     if (assignError) {
       console.error('[DEPOSIT ADDR] Failed to store address:', assignError)
       return serverError(new Error('Failed to store deposit address'))
+    }
+
+    // Register the new deposit address with the Alchemy webhook so incoming
+    // USDC transfers trigger POST /api/deposit/webhook. Non-fatal if this
+    // fails — an admin job can re-register later.
+    try {
+      await addAddressToAlchemyWebhook(address)
+    } catch (e) {
+      console.error('[DEPOSIT ADDR] Failed to register with Alchemy:', e)
     }
 
     // Re-fetch so we can include temp_name (which the assign RPC may have generated)
