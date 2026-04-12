@@ -23,10 +23,11 @@ const MAX_DELAY_MS = 7500
 // Don't let any wallet drop below this balance — sit out until rebalanced.
 const MIN_BALANCE_FLOOR = 5
 
-// Rebalance bounds. If a wallet drifts outside these, nudge back to $200.
-const REBALANCE_LOW  = 50
-const REBALANCE_HIGH = 500
-const REBALANCE_TARGET = 200
+// Rebalance bounds. If a wallet drifts outside these, nudge back to $25.
+// Keep LP balances lean — they're phantom (not backed by on-chain USDC).
+const REBALANCE_LOW  = 10
+const REBALANCE_HIGH = 60
+const REBALANCE_TARGET = 25
 
 const random = <T>(arr: T[]): T => arr[Math.floor(Math.random() * arr.length)]
 const randomInt = (min: number, max: number) => Math.floor(Math.random() * (max - min + 1)) + min
