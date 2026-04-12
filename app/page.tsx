@@ -267,6 +267,11 @@ export default function HolyLiquid() {
       if (json.data) {
         setBalance(json.data.available_usdc)
         setTempName(json.data.temp_name ?? null)
+        // Piggyback deposit address from balance response — eliminates
+        // the separate /api/deposit/address call for returning users.
+        if (json.data.deposit_address && !depositAddress) {
+          setDepositAddress(json.data.deposit_address)
+        }
       }
     } catch {}
   }, [accessToken])
@@ -405,8 +410,14 @@ export default function HolyLiquid() {
         headers: { Authorization: `Bearer ${accessToken}` },
       })
       const j = await res.json()
-      if (j?.data?.deposit_address) setDepositAddress(j.data.deposit_address)
-    } catch {}
+      if (j?.data?.deposit_address) {
+        setDepositAddress(j.data.deposit_address)
+      } else if (j?.error) {
+        showToast(j.error, '#ff7c98')
+      }
+    } catch {
+      showToast('Failed to generate deposit address', '#ff7c98')
+    }
   }, [accessToken, depositAddress])
 
   function openDeposit() {

@@ -64,10 +64,9 @@ export async function GET(req: NextRequest) {
       return serverError(new Error('Failed to store deposit address'))
     }
 
-    // Register the address with the Alchemy webhook so incoming USDC transfers
-    // trigger POST /api/deposit/webhook. Fail loudly here so we do not return
-    // unwatched deposit addresses to users.
-    await ensureAlchemyAddressRegistration(address, wallet)
+    // Register with Alchemy webhook in the background — don't block the response.
+    // If this fails, the Railway deposit sweeper will catch any missed deposits.
+    ensureAlchemyAddressRegistration(address, wallet).catch(() => {})
 
     // Re-fetch so we can include temp_name (which the assign RPC may have generated)
     const { data: refreshed } = await sb
