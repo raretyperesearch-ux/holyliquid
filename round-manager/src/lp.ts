@@ -23,13 +23,18 @@ const MAX_DELAY_MS = 8000
 // Don't let any wallet drop below this balance — sit out until rebalanced.
 const MIN_BALANCE_FLOOR = 5
 
-// Rebalance bounds. If a wallet drifts outside these, nudge back to $25.
+// Rebalance bounds.
 const REBALANCE_LOW  = 10
 const REBALANCE_HIGH = 60
 const REBALANCE_TARGET = 25
 
-// Daily loss cap per wallet. If an LP loses more than this in a 24h window,
-// it sits out until the window resets. Prevents runaway bleeding.
+// Top-up caps — prevent infinite phantom money printing against treasury.
+// Configurable via Railway env vars; defaults are conservative.
+const LP_DAILY_TOPUP_CAP    = Number(process.env.LP_DAILY_TOPUP_CAP) || 20
+const LP_LIFETIME_TOPUP_CAP = Number(process.env.LP_LIFETIME_TOPUP_CAP) || 100
+const LP_TOPUPS_ENABLED      = process.env.LP_TOPUPS_ENABLED !== 'false' // default true
+
+// Daily loss cap per wallet. Prevents runaway bleeding against humans.
 const DAILY_LOSS_CAP = 10
 const dailyLosses = new Map<string, { total: number; resetAt: number }>()
 
@@ -54,12 +59,8 @@ function recordLoss(wallet: string, amount: number) {
 const random = <T>(arr: T[]): T => arr[Math.floor(Math.random() * arr.length)]
 const randomInt = (min: number, max: number) => Math.floor(Math.random() * (max - min + 1)) + min
 
-/**
- * Schedule LP bets for a freshly-opened round. Fires bets on a random delay
- * within the betting window so they don't cluster at t=0.
- *
- * Safe to call even if LP_ENABLED is false — it no-ops.
- */
+// ── BETTING LOGIC ──────────────────────────────────────────────
+
 export function scheduleLpBets(round: Round): void {
   if (process.env.LP_ENABLED !== 'true') return
 
@@ -74,8 +75,6 @@ export function scheduleLpBets(round: Round): void {
 
   for (const wallet of LP_WALLETS) {
     if (Math.random() > BET_PROBABILITY) continue
-
-    // Check daily loss cap before even scheduling
     if (getDailyLoss(wallet) >= DAILY_LOSS_CAP) continue
 
     const maxDelay = Math.min(MAX_DELAY_MS, remainingWindow - 500)
@@ -92,7 +91,6 @@ export function scheduleLpBets(round: Round): void {
 async function placeLpBet(wallet: string, round: Round): Promise<void> {
   const sb = getSupabaseClient()
 
-  // Re-check daily loss cap (could have changed since scheduling)
   if (getDailyLoss(wallet) >= DAILY_LOSS_CAP) return
 
   const { data: bal } = await sb
@@ -110,7 +108,6 @@ async function placeLpBet(wallet: string, round: Round): Promise<void> {
   const amount = Math.min(random(BET_AMOUNTS), Math.floor(available))
   if (amount < 1) return
 
-  // Verify the round is still open AND read the live pool split
   const { data: roundCheck } = await sb
     .from('hl_rounds')
     .select('status, betting_closes_at, pos_pool, neg_pool')
@@ -120,17 +117,13 @@ async function placeLpBet(wallet: string, round: Round): Promise<void> {
   if (!roundCheck || roundCheck.status !== 'open') return
   if (new Date(roundCheck.betting_closes_at).getTime() <= Date.now()) return
 
-  // Smart side selection: bet the MINORITY side to provide liquidity.
-  // If pools are equal or both empty, pick randomly.
-  // This gives a slight contrarian edge and — more importantly — prevents
-  // one-sided rounds from being voided (which wastes everyone's time).
+  // Smart side: bet the minority side 80% of the time
   const posPool = Number(roundCheck.pos_pool) || 0
   const negPool = Number(roundCheck.neg_pool) || 0
   let side: 'pos' | 'neg'
   if (posPool === negPool) {
     side = Math.random() < 0.5 ? 'pos' : 'neg'
   } else {
-    // 80% chance to bet the minority side, 20% random (so it's not 100% predictable)
     const minoritySide: 'pos' | 'neg' = posPool < negPool ? 'pos' : 'neg'
     side = Math.random() < 0.8 ? minoritySide : (minoritySide === 'pos' ? 'neg' : 'pos')
   }
@@ -151,11 +144,6 @@ async function placeLpBet(wallet: string, round: Round): Promise<void> {
   console.log(`[LP] ${shortWallet(wallet)} bet $${amount} on ${side} (round #${round.round_number}, pools: +${posPool}/-${negPool})`)
 }
 
-/**
- * Called by the settle flow (via round-manager events) to track LP losses.
- * Non-LPs are ignored. This is a best-effort in-memory tracker — resets
- * on Railway restart, which is fine (conservative: LPs bet again after restart).
- */
 export function trackLpSettlement(wallet: string, won: boolean, amount: number) {
   if (!LP_WALLETS.includes(wallet)) return
   if (!won) {
@@ -163,10 +151,38 @@ export function trackLpSettlement(wallet: string, won: boolean, amount: number) 
   }
 }
 
+// ── REBALANCER WITH CAPPED TOP-UPS ────────────────────────────
+
 /**
- * Periodically rebalance LP wallets that have drifted too high or too low.
- * Call once at startup; it self-schedules.
+ * Reads how much has been topped up for a wallet today and lifetime
+ * from hl_lp_rebalance_log. Returns { daily, lifetime }.
  */
+async function getTopUpTotals(wallet: string): Promise<{ daily: number; lifetime: number }> {
+  const sb = getSupabaseClient()
+
+  // Lifetime total
+  const { data: lifetimeRows } = await sb
+    .from('hl_lp_rebalance_log')
+    .select('amount')
+    .eq('wallet', wallet)
+    .eq('action', 'topup')
+
+  const lifetime = (lifetimeRows ?? []).reduce((sum, r) => sum + (Number(r.amount) || 0), 0)
+
+  // Daily total (last 24h)
+  const dayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString()
+  const { data: dailyRows } = await sb
+    .from('hl_lp_rebalance_log')
+    .select('amount')
+    .eq('wallet', wallet)
+    .eq('action', 'topup')
+    .gte('created_at', dayAgo)
+
+  const daily = (dailyRows ?? []).reduce((sum, r) => sum + (Number(r.amount) || 0), 0)
+
+  return { daily, lifetime }
+}
+
 export function startLpRebalancer(): void {
   if (process.env.LP_ENABLED !== 'true') return
 
@@ -182,21 +198,80 @@ export function startLpRebalancer(): void {
 
       for (const row of rows ?? []) {
         const balance = Number(row.balance_usdc)
+
+        // ── TOP-UP PATH (balance too low) ──
         if (balance < REBALANCE_LOW) {
-          const topUp = REBALANCE_TARGET - balance
+          if (!LP_TOPUPS_ENABLED) {
+            console.log(`[LP] ${shortWallet(row.wallet)} low ($${balance.toFixed(2)}) but topups disabled`)
+            continue
+          }
+
+          const topUpNeeded = REBALANCE_TARGET - balance
+          const { daily, lifetime } = await getTopUpTotals(row.wallet)
+
+          // Check lifetime cap
+          if (lifetime >= LP_LIFETIME_TOPUP_CAP) {
+            console.log(`[LP] ${shortWallet(row.wallet)} low ($${balance.toFixed(2)}) but LIFETIME cap reached. Lifetime: $${lifetime.toFixed(2)}/$${LP_LIFETIME_TOPUP_CAP}`)
+            continue
+          }
+
+          // Check daily cap
+          if (daily >= LP_DAILY_TOPUP_CAP) {
+            console.log(`[LP] ${shortWallet(row.wallet)} low ($${balance.toFixed(2)}) but cap reached. Daily: $${daily.toFixed(2)}/$${LP_DAILY_TOPUP_CAP} | Lifetime: $${lifetime.toFixed(2)}/$${LP_LIFETIME_TOPUP_CAP}`)
+            continue
+          }
+
+          // Clamp top-up to not exceed either cap
+          const dailyHeadroom = LP_DAILY_TOPUP_CAP - daily
+          const lifetimeHeadroom = LP_LIFETIME_TOPUP_CAP - lifetime
+          const topUp = Math.min(topUpNeeded, dailyHeadroom, lifetimeHeadroom)
+
+          if (topUp < 1) {
+            console.log(`[LP] ${shortWallet(row.wallet)} low ($${balance.toFixed(2)}) but headroom too small ($${topUp.toFixed(2)})`)
+            continue
+          }
+
+          // Execute the top-up
           await sb.rpc('hl_increase_balance', { p_wallet: row.wallet, p_amount: topUp })
-          await sb.from('hl_transactions').insert({
-            wallet: row.wallet, type: 'deposit', amount: topUp, note: 'lp rebalance',
+
+          // Log to hl_lp_rebalance_log for cap tracking
+          await sb.from('hl_lp_rebalance_log').insert({
+            wallet: row.wallet,
+            action: 'topup',
+            amount: topUp,
+            balance_before: balance,
+            balance_after: balance + topUp,
+            note: `daily $${(daily + topUp).toFixed(2)}/$${LP_DAILY_TOPUP_CAP} | lifetime $${(lifetime + topUp).toFixed(2)}/$${LP_LIFETIME_TOPUP_CAP}`,
           })
-          console.log(`[LP] Rebalanced ${shortWallet(row.wallet)}: $${balance.toFixed(2)} → $${REBALANCE_TARGET}`)
+
+          // Also log to hl_transactions for the audit trail
+          await sb.from('hl_transactions').insert({
+            wallet: row.wallet, type: 'deposit', amount: topUp, note: 'lp rebalance (capped)',
+          })
+
+          console.log(`[LP] Topped ${shortWallet(row.wallet)}: $${balance.toFixed(2)} → $${(balance + topUp).toFixed(2)} (printed $${topUp.toFixed(2)}, daily $${(daily + topUp).toFixed(2)}/$${LP_DAILY_TOPUP_CAP})`)
+
+        // ── SKIM PATH (balance too high) — no cap needed, this is profit ──
         } else if (balance > REBALANCE_HIGH) {
           const skim = balance - REBALANCE_TARGET
           await sb.from('hl_balances')
             .update({ balance_usdc: REBALANCE_TARGET, updated_at: new Date().toISOString() })
             .eq('wallet', row.wallet)
-          await sb.from('hl_transactions').insert({
-            wallet: row.wallet, type: 'withdraw', amount: skim, note: 'lp rebalance',
+
+          // Log skim to rebalance log too (for completeness)
+          await sb.from('hl_lp_rebalance_log').insert({
+            wallet: row.wallet,
+            action: 'skim',
+            amount: skim,
+            balance_before: balance,
+            balance_after: REBALANCE_TARGET,
+            note: 'skim — LP got hot',
           })
+
+          await sb.from('hl_transactions').insert({
+            wallet: row.wallet, type: 'withdraw', amount: skim, note: 'lp rebalance skim',
+          })
+
           console.log(`[LP] Skimmed ${shortWallet(row.wallet)}: $${balance.toFixed(2)} → $${REBALANCE_TARGET}`)
         }
       }
@@ -207,7 +282,7 @@ export function startLpRebalancer(): void {
 
   tick()
   setInterval(tick, REBALANCE_INTERVAL_MS)
-  console.log('[LP] Rebalancer started')
+  console.log(`[LP] Rebalancer started — daily cap $${LP_DAILY_TOPUP_CAP}, lifetime cap $${LP_LIFETIME_TOPUP_CAP}, topups ${LP_TOPUPS_ENABLED ? 'ON' : 'OFF'}`)
 }
 
 function shortWallet(w: string): string {
