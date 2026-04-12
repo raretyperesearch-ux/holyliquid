@@ -25,9 +25,9 @@ const MAX_DELAY_MS = 7500
 const MIN_BALANCE_FLOOR = 5
 
 // Rebalance bounds. If a bot drifts outside these, it gets nudged back to $200.
-const REBALANCE_LOW  = 50
-const REBALANCE_HIGH = 500
-const REBALANCE_TARGET = 200
+const REBALANCE_LOW  = 10
+const REBALANCE_HIGH = 60
+const REBALANCE_TARGET = 25
 
 const random = <T>(arr: T[]): T => arr[Math.floor(Math.random() * arr.length)]
 const randomInt = (min: number, max: number) => Math.floor(Math.random() * (max - min + 1)) + min
