@@ -1896,3 +1896,18 @@ html, body, #__next { width: 100%; min-height: 100%; }
   letter-spacing: 0.02em;
 }
 
+/* ── DEPOSIT ADDRESS BOX (per-user HD address display) ── */
+.deposit-addr-box {
+  font-size: 11px !important;
+  line-height: 1.5 !important;
+  padding: 14px !important;
+  background: rgba(125,242,168,0.04) !important;
+  border-color: rgba(125,242,168,0.25) !important;
+  text-align: center;
+  font-family: ui-monospace, 'SF Mono', monospace !important;
+}
+.deposit-addr-box:hover {
+  background: rgba(125,242,168,0.08) !important;
+  border-color: rgba(125,242,168,0.5) !important;
+}
+

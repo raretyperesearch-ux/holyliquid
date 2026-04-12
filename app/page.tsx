@@ -3,13 +3,12 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import dynamic from 'next/dynamic'
 import { createPortal } from 'react-dom'
-import { usePrivy, useSendTransaction, useWallets } from '@privy-io/react-auth'
+import { usePrivy } from '@privy-io/react-auth'
 import { useRound, type LastResult } from '@/hooks/useRound'
 import { LiveTicker } from './components/LiveTicker'
 import { DiscordButton } from './components/DiscordButton'
 import { SoundToggle } from './components/SoundToggle'
 import { sounds } from '../lib/sounds'
-import { encodeFunctionData, parseUnits } from 'viem'
 
 const PriceWaterChart = dynamic(() => import('@/components/game/PriceWaterChart'), { ssr: false })
 
@@ -144,8 +143,6 @@ function LastResultBanner({
 
 export default function HolyLiquid() {
   const { ready, authenticated, login, getAccessToken, user } = usePrivy()
-  const { wallets } = useWallets()
-  const { sendTransaction } = useSendTransaction()
   const [accessToken, setAccessToken] = useState<string | null>(null)
   const [balance, setBalance] = useState<number | null>(null)
   const [tempName, setTempName] = useState<string | null>(null)
@@ -161,10 +158,7 @@ export default function HolyLiquid() {
 
   // Deposit / withdraw modal state
   const [modal, setModal] = useState<ModalKind>(null)
-  const [treasuryWallet, setTreasuryWallet] = useState<string | null>(null)
-  const [depositTokenContract, setDepositTokenContract] = useState<string | null>(null)
-  const [treasuryLoaded, setTreasuryLoaded] = useState(false)
-  const [depositAmount, setDepositAmount] = useState('')
+  const [depositAddress, setDepositAddress] = useState<string | null>(null)
   const [customAmount, setCustomAmount] = useState('')
   const [withdrawAmount, setWithdrawAmount] = useState('')
   const [withdrawTo, setWithdrawTo] = useState('')
@@ -401,27 +395,23 @@ export default function HolyLiquid() {
     return placeBetWith(selectedSide, selectedChip)
   }
 
-  // Fetch treasury wallet once on first mount so the deposit modal has it ready
+  // Fetch the user's per-user HD deposit address. First call provisions it
+  // server-side (derives from DEPOSIT_HD_SEED + registers with Alchemy webhook);
+  // subsequent calls return the cached address.
   useEffect(() => {
-    let cancelled = false
-    fetch('/api/deposit')
+    if (!accessToken) return
+    fetch('/api/deposit/address', {
+      headers: { Authorization: `Bearer ${accessToken}` },
+    })
       .then(r => r.json())
       .then(j => {
-        if (cancelled) return
-        setTreasuryWallet(j?.data?.treasury_wallet ?? null)
-        setDepositTokenContract(j?.data?.token_contract ?? null)
-        setTreasuryLoaded(true)
+        if (j?.data?.deposit_address) setDepositAddress(j.data.deposit_address)
       })
-      .catch(() => {
-        if (cancelled) return
-        setTreasuryLoaded(true)
-      })
-    return () => { cancelled = true }
-  }, [])
+      .catch(() => {})
+  }, [accessToken])
 
   function openDeposit() {
     playSfx('modalOpen')
-    setDepositAmount('')
     setModal('deposit')
   }
   function openWithdraw() {
@@ -480,115 +470,6 @@ export default function HolyLiquid() {
     window.addEventListener('resize', updateRect)
     return () => window.removeEventListener('resize', updateRect)
   }, [getStepTarget, modal, showWelcome, spotlightStep, spotlightSteps])
-
-  async function creditDeposit(txHash: string, amt: number) {
-    if (!accessToken) return { ok: false as const, error: 'Missing auth' }
-    const res = await fetch('/api/deposit', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${accessToken}` },
-      body: JSON.stringify({ tx_hash: txHash.trim(), amount: amt }),
-    })
-    const json = await res.json()
-    if (!json.success) {
-      return { ok: false as const, error: json.error || 'Deposit failed' }
-    }
-    return { ok: true as const, data: json.data as { amount_credited: number } }
-  }
-
-  async function submitDepositAuto() {
-    if (!accessToken) return
-    const amt = Number(depositAmount)
-    if (!Number.isFinite(amt) || amt <= 0) {
-      return showToast('Enter a valid amount', '#ff7c98')
-    }
-    if (!treasuryWallet || !depositTokenContract) {
-      return showToast('Deposit route unavailable', '#ff7c98')
-    }
-
-    // Get the user's wallet — prefer Privy embedded, fall back to first connected
-    const embedded = wallets.find(w => w.walletClientType === 'privy')
-    const wallet = embedded ?? wallets[0]
-    if (!wallet) {
-      return showToast('No wallet available. Please log in again.', '#ff7c98')
-    }
-
-    setModalBusy(true)
-    showToast('Awaiting wallet confirmation…', '#9fd2ff')
-
-    try {
-      // ── Switch the wallet to Base mainnet BEFORE sendTransaction.
-      // Privy doesn't auto-switch on every sendTransaction call — if the
-      // embedded wallet's current chainId isn't 8453, it throws with
-      // "chainId should be same as current chainId". Explicit switch fixes it.
-      // Safe to call even if already on Base — no-op.
-      const currentChainId = typeof wallet.chainId === 'string'
-        ? parseInt(wallet.chainId.replace(/^eip155:/, '').replace(/^0x/, ''), wallet.chainId.includes('0x') ? 16 : 10)
-        : Number(wallet.chainId)
-      if (currentChainId !== 8453) {
-        try {
-          await wallet.switchChain(8453)
-        } catch (switchErr) {
-          const switchMsg = switchErr instanceof Error ? switchErr.message : String(switchErr)
-          throw new Error(`Could not switch to Base (chain 8453): ${switchMsg}. Make sure Base is enabled in your Privy dashboard app settings.`)
-        }
-      }
-
-      // Encode the USDC transfer call data
-      const txData = encodeFunctionData({
-        abi: [{
-          type: 'function',
-          name: 'transfer',
-          stateMutability: 'nonpayable',
-          inputs: [{ name: 'to', type: 'address' }, { name: 'value', type: 'uint256' }],
-          outputs: [{ name: '', type: 'bool' }],
-        }],
-        functionName: 'transfer',
-        args: [treasuryWallet as `0x${string}`, parseUnits(String(amt), 6)],
-      })
-
-      // Send via Privy's native API (works with embedded AND external wallets)
-      const result = await sendTransaction(
-        {
-          to: depositTokenContract as `0x${string}`,
-          data: txData,
-          value: BigInt(0),
-          chainId: 8453,  // Base mainnet
-        },
-        {
-          address: wallet.address as `0x${string}`,
-          uiOptions: {
-            showWalletUIs: true,
-            description: `Deposit $${amt} USDC to HolyLiquid`,
-          },
-        }
-      )
-
-      const txHash = result.hash
-      if (!txHash || !txHash.startsWith('0x')) {
-        throw new Error('Wallet did not return a valid transaction hash')
-      }
-
-      showToast('Verifying deposit…', '#9fd2ff')
-      const credited = await creditDeposit(txHash, amt)
-      if (!credited.ok) throw new Error(credited.error)
-
-      playSfx('confirm')
-      showToast(`Deposited $${fmt(credited.data.amount_credited)}`, '#7df2a8')
-      fetchBalance()
-      setModal(null)
-    } catch (e) {
-      playSfx('invalid')
-      const msg = e instanceof Error ? e.message : 'Deposit failed'
-      // User rejection is not an error worth shouting about
-      if (msg.toLowerCase().includes('reject') || msg.toLowerCase().includes('user denied')) {
-        showToast('Cancelled', '#aaa')
-      } else {
-        showToast(msg, '#ff7c98')
-      }
-    } finally {
-      setModalBusy(false)
-    }
-  }
 
   function submitCustomChip() {
     const n = Math.floor(Number(customAmount))
@@ -1236,46 +1117,39 @@ export default function HolyLiquid() {
               <>
                 <div className="modal-title">Deposit USDC</div>
                 {tempName && (
-                  <div className="modal-tempname">
-                    signed in as <strong>{tempName}</strong>
-                  </div>
+                  <div className="modal-tempname">signed in as <strong>{tempName}</strong></div>
                 )}
                 <div className="modal-sub">
-                  Deposit USDC on <strong>Base</strong> in one tap. Confirm the transfer in your wallet and we&apos;ll credit your balance automatically.
+                  Send <strong>USDC on Base</strong> to your personal address below. From any wallet — Coinbase, MetaMask, anywhere. Funds credit automatically within ~10 seconds.
                 </div>
                 <div className="modal-field">
-                  <label>Treasury Wallet</label>
-                  <div className="modal-addr" title="Click to select">
-                    {treasuryWallet
-                      ? treasuryWallet
-                      : treasuryLoaded
-                        ? 'Deposit address unavailable — contact support'
-                        : 'Loading...'}
+                  <label>Your Deposit Address</label>
+                  {depositAddress ? (
+                    <div
+                      className="modal-input mono deposit-addr-box"
+                      onClick={() => {
+                        navigator.clipboard.writeText(depositAddress)
+                        showToast('Address copied', '#7df2a8')
+                      }}
+                      title="Click to copy"
+                      style={{ cursor: 'pointer', wordBreak: 'break-all', userSelect: 'all' }}
+                    >
+                      {depositAddress}
+                    </div>
+                  ) : (
+                    <div className="modal-input mono" style={{ opacity: 0.5 }}>Generating address…</div>
+                  )}
+                </div>
+                <div className="modal-sub" style={{ fontSize: 10, opacity: 0.55, marginTop: 8 }}>
+                  ⚠️ Only send <strong>USDC on Base</strong>. Other tokens or chains will be lost.
+                </div>
+                {balance !== null && (
+                  <div className="modal-sub" style={{ textAlign: 'right' }}>
+                    Balance: <strong style={{ color: '#7df2a8' }}>${fmt(balance)}</strong>
                   </div>
-                </div>
-                <div className="modal-field">
-                  <label>Amount (USDC)</label>
-                  <input
-                    className="modal-input"
-                    type="number"
-                    inputMode="decimal"
-                    placeholder="10.00"
-                    value={depositAmount}
-                    onChange={(e) => setDepositAmount(e.target.value)}
-                  />
-                </div>
+                )}
                 <div className="modal-btns">
-                  <button
-                    className="mb submit"
-                    style={{ width: '100%' }}
-                    disabled={modalBusy || !treasuryWallet}
-                    onClick={submitDepositAuto}
-                  >
-                    {modalBusy ? 'Depositing…' : 'Deposit Now'}
-                  </button>
-                </div>
-                <div className="modal-btns">
-                  <button className="mb cancel" disabled={modalBusy} onClick={closeModal}>Cancel</button>
+                  <button className="mb cancel" onClick={closeModal}>Close</button>
                 </div>
               </>
             )}
