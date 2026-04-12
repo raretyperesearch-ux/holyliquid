@@ -5,7 +5,7 @@ import { calculateResult, settleRound } from './settle'
 import { voidRound } from './void'
 import { broadcast } from './broadcast'
 import { scheduleBotBets } from './bots'
-import { scheduleLpBets } from './lp'
+import { scheduleMarketMakerBets } from './marketMaker'
 
 const ROUND_DURATION_MS   = 30_000
 const BETTING_DURATION_MS = 10_000
@@ -61,8 +61,8 @@ async function runOneRound(): Promise<void> {
   await broadcast.roundState(round)
   console.log(`[Loop] Round #${roundNumber} OPEN | ${position.direction.toUpperCase()} ${position.pair} $${position.size.toLocaleString()} @ ${position.leverage}x | liq: $${round.liq_price.toFixed(2)}`)
 
-  // Fire LP bets on a random delay within the betting window
-  scheduleLpBets(round)
+  // Fire market-maker bets across seed/balance/rescue phases
+  scheduleMarketMakerBets(round)
 
   // Fire bot bets on a random delay within the betting window
   scheduleBotBets(round)
