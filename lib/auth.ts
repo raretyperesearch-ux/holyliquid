@@ -14,12 +14,60 @@ function getPrivy() {
   return _privy
 }
 
+/**
+ * Detects the JWT clock-skew errors thrown by jose (underneath Privy):
+ *   - `"iat" claim timestamp check failed` — browser clock ahead of server
+ *   - `"nbf" claim timestamp check failed` — token not yet valid
+ *   - `"exp" claim timestamp check failed` — genuinely expired
+ *   - plain `timestamp check failed`
+ */
+function isClockSkewError(e: unknown): boolean {
+  const msg = (e as { message?: string })?.message || ''
+  return /timestamp check failed|\b(iat|nbf|exp)\b.*claim/i.test(msg)
+}
+
+const CLOCK_SKEW_RETRIES = 3
+const CLOCK_SKEW_RETRY_DELAY_MS = 600
+
+/**
+ * Verify a Privy auth token with tolerance for small client/server clock
+ * skew. If the first attempt fails with an `iat`/`nbf` timestamp error,
+ * we wait briefly and retry — a few hundred ms is usually enough for the
+ * token to become valid on our clock.
+ *
+ * All errors are re-thrown with the word "token" in the message so that
+ * existing route catch blocks translate them into a clean 401 instead
+ * of a 500 with the raw JWT error leaking to the client.
+ */
+async function verifyTokenTolerant(token: string) {
+  const privy = getPrivy()
+  let lastError: unknown = null
+
+  for (let attempt = 0; attempt < CLOCK_SKEW_RETRIES; attempt++) {
+    try {
+      return await privy.verifyAuthToken(token)
+    } catch (e) {
+      lastError = e
+      if (!isClockSkewError(e)) break
+      if (attempt < CLOCK_SKEW_RETRIES - 1) {
+        await new Promise(r => setTimeout(r, CLOCK_SKEW_RETRY_DELAY_MS))
+      }
+    }
+  }
+
+  if (isClockSkewError(lastError)) {
+    throw new Error('token not yet valid — please refresh and try again')
+  }
+  const msg = (lastError as { message?: string })?.message || 'token verification failed'
+  throw new Error(msg.includes('token') ? msg : `token verification failed: ${msg}`)
+}
+
 export async function verifyAuth(req: NextRequest): Promise<string> {
   const token = req.headers.get('authorization')?.replace('Bearer ', '')
   if (!token) throw new Error('Missing authorization token')
 
   // Step 1: verify the JWT and get the user ID
-  const claims = await getPrivy().verifyAuthToken(token)
+  const claims = await verifyTokenTolerant(token)
 
   // Step 2: fetch the full user to get linked accounts
   const user = await getPrivy().getUser(claims.userId)
@@ -48,7 +96,7 @@ export async function verifyAuthFull(req: NextRequest): Promise<AuthContext> {
   const token = req.headers.get('authorization')?.replace('Bearer ', '')
   if (!token) throw new Error('Missing authorization token')
 
-  const claims = await getPrivy().verifyAuthToken(token)
+  const claims = await verifyTokenTolerant(token)
   const user = await getPrivy().getUser(claims.userId)
 
   const linkedWallets = getLinkedEvmWallets(user)

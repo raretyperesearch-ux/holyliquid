@@ -10,7 +10,7 @@ import { resolveOrphanedRounds } from './recover'
 import { gameLoop } from './loop'
 import { startHealthServer } from './health'
 import { startBotRebalancer } from './bots'
-import { startLpRebalancer } from './lp'
+import { startMarketMaker } from './marketMaker'
 import { startDepositSweeper } from './depositSweeper'
 
 async function main() {
@@ -29,8 +29,8 @@ async function main() {
   console.log('[HolyLiquid] ✓ Health server running on :3001')
 
   console.log('[HolyLiquid] All systems ready. Starting game loop.')
-  startLpRebalancer()
   startBotRebalancer()
+  startMarketMaker()
   startDepositSweeper()
   await gameLoop()
 }
