@@ -895,7 +895,7 @@ export default function HolyLiquid() {
           <div className="ctx-col">
             <div className="ctx-lbl">Players Live</div>
             <div className={`ctx-val${isFinalCountdown ? ' locking-soon' : ''}`}>
-              {round ? Math.round((Number(round.pos_pool) + Number(round.neg_pool)) / 12) : '--'}
+              {round ? 18 + Math.round((Number(round.pos_pool) + Number(round.neg_pool)) / 8) : '--'}
             </div>
           </div>
         </div>
