@@ -2,6 +2,8 @@ import { Round, RoundResult, PriceData } from './types'
 import { db } from './db'
 import { broadcast } from './broadcast'
 import { voidRound } from './void'
+import { trackLpSettlement } from './lp'
+import { trackBotSettlement } from './bots'
 
 const PLATFORM_FEE = 0.07
 
@@ -71,6 +73,9 @@ export async function settleRound(
       wallet: bet.wallet, type: 'bet', amount: bet.amount,
       round_id: round.id, bet_id: bet.id, note: 'loss',
     })
+    // Track LP/bot losses for daily cap
+    trackLpSettlement(bet.wallet, false, bet.amount)
+    trackBotSettlement(bet.wallet, false, bet.amount)
   }
 
   // Process wins
@@ -83,6 +88,8 @@ export async function settleRound(
       round_id: round.id, bet_id: bet.id,
       note: `win: $${bet.winnings.toFixed(2)} on $${bet.amount} bet`,
     })
+    trackLpSettlement(bet.wallet, true, bet.amount)
+    trackBotSettlement(bet.wallet, true, bet.amount)
   }
 
   // Platform fee
