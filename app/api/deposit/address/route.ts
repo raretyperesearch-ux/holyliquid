@@ -28,7 +28,8 @@ export async function GET(req: NextRequest) {
       .single()
 
     if (existing?.deposit_address) {
-      await ensureAlchemyAddressRegistration(existing.deposit_address, wallet)
+      // Fast path — address already provisioned and registered with Alchemy.
+      // No need to re-register on every call (it was registered at provisioning time).
       return ok({
         deposit_address: existing.deposit_address,
         temp_name: existing.temp_name,

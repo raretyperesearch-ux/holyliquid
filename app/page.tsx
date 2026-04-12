@@ -395,24 +395,23 @@ export default function HolyLiquid() {
     return placeBetWith(selectedSide, selectedChip)
   }
 
-  // Fetch the user's per-user HD deposit address. First call provisions it
-  // server-side (derives from DEPOSIT_HD_SEED + registers with Alchemy webhook);
-  // subsequent calls return the cached address.
-  useEffect(() => {
-    if (!accessToken) return
-    fetch('/api/deposit/address', {
-      headers: { Authorization: `Bearer ${accessToken}` },
-    })
-      .then(r => r.json())
-      .then(j => {
-        if (j?.data?.deposit_address) setDepositAddress(j.data.deposit_address)
+  // Fetch the user's per-user HD deposit address lazily — only when the deposit
+  // modal is first opened, not on app load. Cached once fetched.
+  const fetchDepositAddress = useCallback(async () => {
+    if (!accessToken || depositAddress) return
+    try {
+      const res = await fetch('/api/deposit/address', {
+        headers: { Authorization: `Bearer ${accessToken}` },
       })
-      .catch(() => {})
-  }, [accessToken])
+      const j = await res.json()
+      if (j?.data?.deposit_address) setDepositAddress(j.data.deposit_address)
+    } catch {}
+  }, [accessToken, depositAddress])
 
   function openDeposit() {
     playSfx('modalOpen')
     setModal('deposit')
+    fetchDepositAddress()
   }
   function openWithdraw() {
     playSfx('modalOpen')
