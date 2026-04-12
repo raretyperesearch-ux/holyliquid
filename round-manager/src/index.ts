@@ -11,6 +11,7 @@ import { gameLoop } from './loop'
 import { startHealthServer } from './health'
 import { startBotRebalancer } from './bots'
 import { startLpRebalancer } from './lp'
+import { startDepositSweeper } from './depositSweeper'
 
 async function main() {
   console.log('[HolyLiquid] Starting round manager...')
@@ -30,6 +31,7 @@ async function main() {
   console.log('[HolyLiquid] All systems ready. Starting game loop.')
   startLpRebalancer()
   startBotRebalancer()
+  startDepositSweeper()
   await gameLoop()
 }
 
