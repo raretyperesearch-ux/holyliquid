@@ -62,7 +62,10 @@ const randomInt = (min: number, max: number) => Math.floor(Math.random() * (max 
 // ── BETTING LOGIC ──────────────────────────────────────────────
 
 export function scheduleLpBets(round: Round): void {
-  if (process.env.LP_ENABLED !== 'true') return
+  if (process.env.LP_ENABLED !== 'true') {
+    console.log(`[LP] Round #${round.round_number}: LP_ENABLED is not 'true' — skipping`)
+    return
+  }
 
   const bettingClosesAt = new Date(round.betting_closes_at).getTime()
   const now = Date.now()
@@ -73,22 +76,39 @@ export function scheduleLpBets(round: Round): void {
     return
   }
 
-  for (const wallet of LP_WALLETS) {
-    if (Math.random() > BET_PROBABILITY) continue
-    if (getDailyLoss(wallet) >= DAILY_LOSS_CAP) continue
-
-    const maxDelay = Math.min(MAX_DELAY_MS, remainingWindow - 500)
+  const maxDelay = Math.min(MAX_DELAY_MS, remainingWindow - 500)
+  const schedule = (wallet: string, force = false) => {
     const delay = randomInt(MIN_DELAY_MS, maxDelay)
-
     setTimeout(() => {
-      placeLpBet(wallet, round).catch(err => {
+      placeLpBet(wallet, round, force).catch(err => {
         console.warn(`[LP] ${shortWallet(wallet)} bet failed:`, err?.message || err)
       })
     }, delay)
   }
+
+  let scheduledCount = 0
+  for (const wallet of LP_WALLETS) {
+    if (Math.random() > BET_PROBABILITY) continue
+    if (getDailyLoss(wallet) >= DAILY_LOSS_CAP) continue
+    schedule(wallet)
+    scheduledCount++
+  }
+
+  // Guarantee at least one LP fires per round so every round has action.
+  // Forced bets bypass the balance floor (they only need >= $1 to fire).
+  if (scheduledCount === 0) {
+    const eligible = LP_WALLETS.filter(w => getDailyLoss(w) < DAILY_LOSS_CAP)
+    if (eligible.length > 0) {
+      const wallet = random(eligible)
+      schedule(wallet, true)
+      console.log(`[LP] Round #${round.round_number}: forcing ${shortWallet(wallet)} to guarantee action`)
+    } else {
+      console.log(`[LP] Round #${round.round_number}: all LPs over daily loss cap, no forced bet`)
+    }
+  }
 }
 
-async function placeLpBet(wallet: string, round: Round): Promise<void> {
+async function placeLpBet(wallet: string, round: Round, force = false): Promise<void> {
   const sb = getSupabaseClient()
 
   if (getDailyLoss(wallet) >= DAILY_LOSS_CAP) return
@@ -100,8 +120,10 @@ async function placeLpBet(wallet: string, round: Round): Promise<void> {
     .single()
 
   const available = (Number(bal?.balance_usdc) || 0) - (Number(bal?.locked_usdc) || 0)
-  if (available < MIN_BALANCE_FLOOR) {
-    console.log(`[LP] ${shortWallet(wallet)} below floor ($${available.toFixed(2)}) — sitting out`)
+  // Forced bets bypass the soft floor — they only need >= $1 to place something.
+  const floor = force ? 1 : MIN_BALANCE_FLOOR
+  if (available < floor) {
+    console.log(`[LP] ${shortWallet(wallet)} below floor ($${available.toFixed(2)}${force ? ', forced' : ''}) — sitting out`)
     return
   }
 

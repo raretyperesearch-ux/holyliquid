@@ -58,7 +58,10 @@ const randomInt = (min: number, max: number) => Math.floor(Math.random() * (max 
  * Safe to call even if BOTS_ENABLED is false — it no-ops.
  */
 export function scheduleBotBets(round: Round): void {
-  if (process.env.BOTS_ENABLED !== 'true') return
+  if (process.env.BOTS_ENABLED !== 'true') {
+    console.log(`[Bots] Round #${round.round_number}: BOTS_ENABLED is not 'true' — skipping`)
+    return
+  }
 
   const bettingClosesAt = new Date(round.betting_closes_at).getTime()
   const now = Date.now()
@@ -70,10 +73,10 @@ export function scheduleBotBets(round: Round): void {
   }
 
   const maxDelay = Math.min(MAX_DELAY_MS, remainingWindow - 500)
-  const schedule = (wallet: string) => {
+  const schedule = (wallet: string, force = false) => {
     const delay = randomInt(MIN_DELAY_MS, maxDelay)
     setTimeout(() => {
-      placeBotBet(wallet, round).catch(err => {
+      placeBotBet(wallet, round, force).catch(err => {
         console.warn(`[Bots] ${shortWallet(wallet)} bet failed:`, err?.message || err)
       })
     }, delay)
@@ -88,12 +91,12 @@ export function scheduleBotBets(round: Round): void {
   }
 
   // Guarantee at least one bot fires per round so every round has action.
-  // Only pulls from wallets under the daily loss cap; skips if all are tapped out.
+  // Forced bets bypass the balance floor (they only need >= $1 to fire).
   if (scheduledCount === 0) {
     const eligible = BOT_WALLETS.filter(w => getDailyLoss(w) < DAILY_LOSS_CAP)
     if (eligible.length > 0) {
       const wallet = random(eligible)
-      schedule(wallet)
+      schedule(wallet, true)
       console.log(`[Bots] Round #${round.round_number}: forcing ${shortWallet(wallet)} to guarantee action`)
     } else {
       console.log(`[Bots] Round #${round.round_number}: all bots over daily loss cap, no forced bet`)
@@ -101,7 +104,7 @@ export function scheduleBotBets(round: Round): void {
   }
 }
 
-async function placeBotBet(wallet: string, round: Round): Promise<void> {
+async function placeBotBet(wallet: string, round: Round, force = false): Promise<void> {
   const sb = getSupabaseClient()
 
   if (getDailyLoss(wallet) >= DAILY_LOSS_CAP) return
@@ -113,8 +116,10 @@ async function placeBotBet(wallet: string, round: Round): Promise<void> {
     .single()
 
   const available = (Number(bal?.balance_usdc) || 0) - (Number(bal?.locked_usdc) || 0)
-  if (available < MIN_BALANCE_FLOOR) {
-    console.log(`[Bots] ${shortWallet(wallet)} below floor ($${available.toFixed(2)}) — sitting out`)
+  // Forced bets bypass the soft floor — they only need >= $1 to place something.
+  const floor = force ? 1 : MIN_BALANCE_FLOOR
+  if (available < floor) {
+    console.log(`[Bots] ${shortWallet(wallet)} below floor ($${available.toFixed(2)}${force ? ', forced' : ''}) — sitting out`)
     return
   }
 
