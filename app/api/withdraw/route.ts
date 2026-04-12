@@ -74,6 +74,35 @@ export async function POST(req: NextRequest) {
       console.warn('[WITHDRAW] hl_idempotency insert failed (table may not exist yet):', e)
     }
 
+    // ── Explicit balance check BEFORE the atomic debit.
+    // This gives the user a clear error with their actual available amount,
+    // and protects against the case where locked_usdc eats into their balance.
+    const { data: bal, error: balError } = await sb
+      .from('hl_balances')
+      .select('balance_usdc, locked_usdc')
+      .eq('wallet', auth.primaryWallet)
+      .single()
+
+    if (balError || !bal) {
+      console.error('[WITHDRAW] Balance lookup failed:', { wallet: auth.primaryWallet, error: balError })
+      if (idempotencyTracked) {
+        try { await sb.from('hl_idempotency').update({ status: 'failed', completed_at: new Date().toISOString() }).eq('idempotency_key', idempotencyKey) } catch {}
+      }
+      return badRequest('No balance found for this account')
+    }
+
+    const balanceUsdc = Number(bal.balance_usdc) || 0
+    const lockedUsdc = Number(bal.locked_usdc) || 0
+    const available = balanceUsdc - lockedUsdc
+
+    if (available < amount) {
+      console.warn('[WITHDRAW] Insufficient available:', { wallet: auth.primaryWallet, balance: balanceUsdc, locked: lockedUsdc, available, requested: amount })
+      if (idempotencyTracked) {
+        try { await sb.from('hl_idempotency').update({ status: 'failed', completed_at: new Date().toISOString() }).eq('idempotency_key', idempotencyKey) } catch {}
+      }
+      return badRequest(`Insufficient available balance. You have $${available.toFixed(2)} available ($${balanceUsdc.toFixed(2)} total, $${lockedUsdc.toFixed(2)} locked in bets).`)
+    }
+
     // ── Phase 1: atomic balance debit (gross amount)
     const { data: debitedBalance, error: updateError } = await sb.rpc('hl_withdraw_debit', {
       p_wallet: auth.primaryWallet,
@@ -81,6 +110,7 @@ export async function POST(req: NextRequest) {
     })
 
     if (updateError || debitedBalance === null || debitedBalance === undefined) {
+      console.error('[WITHDRAW] hl_withdraw_debit failed:', { wallet: auth.primaryWallet, amount, error: updateError })
       if (idempotencyTracked) {
         try {
           await sb.from('hl_idempotency').update({
@@ -89,7 +119,7 @@ export async function POST(req: NextRequest) {
           }).eq('idempotency_key', idempotencyKey)
         } catch {}
       }
-      return badRequest('Insufficient available balance')
+      return badRequest('Withdrawal failed — please try again')
     }
 
     // ── Phase 2: send the on-chain transfer
