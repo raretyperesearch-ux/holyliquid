@@ -69,18 +69,35 @@ export function scheduleBotBets(round: Round): void {
     return
   }
 
-  for (const wallet of BOT_WALLETS) {
-    if (Math.random() > BET_PROBABILITY) continue
-    if (getDailyLoss(wallet) >= DAILY_LOSS_CAP) continue
-
-    const maxDelay = Math.min(MAX_DELAY_MS, remainingWindow - 500)
+  const maxDelay = Math.min(MAX_DELAY_MS, remainingWindow - 500)
+  const schedule = (wallet: string) => {
     const delay = randomInt(MIN_DELAY_MS, maxDelay)
-
     setTimeout(() => {
       placeBotBet(wallet, round).catch(err => {
         console.warn(`[Bots] ${shortWallet(wallet)} bet failed:`, err?.message || err)
       })
     }, delay)
+  }
+
+  let scheduledCount = 0
+  for (const wallet of BOT_WALLETS) {
+    if (Math.random() > BET_PROBABILITY) continue
+    if (getDailyLoss(wallet) >= DAILY_LOSS_CAP) continue
+    schedule(wallet)
+    scheduledCount++
+  }
+
+  // Guarantee at least one bot fires per round so every round has action.
+  // Only pulls from wallets under the daily loss cap; skips if all are tapped out.
+  if (scheduledCount === 0) {
+    const eligible = BOT_WALLETS.filter(w => getDailyLoss(w) < DAILY_LOSS_CAP)
+    if (eligible.length > 0) {
+      const wallet = random(eligible)
+      schedule(wallet)
+      console.log(`[Bots] Round #${round.round_number}: forcing ${shortWallet(wallet)} to guarantee action`)
+    } else {
+      console.log(`[Bots] Round #${round.round_number}: all bots over daily loss cap, no forced bet`)
+    }
   }
 }
 
