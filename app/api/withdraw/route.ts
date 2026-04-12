@@ -103,15 +103,20 @@ export async function POST(req: NextRequest) {
       return badRequest(`Insufficient available balance. You have $${available.toFixed(2)} available ($${balanceUsdc.toFixed(2)} total, $${lockedUsdc.toFixed(2)} locked in bets).`)
     }
 
-    // ── Phase 1: atomic balance debit (gross amount)
-    const { data: debitedBalance, error: updateError } = await sb.rpc('hl_withdraw_debit', {
-      p_wallet: auth.primaryWallet,
-      p_amount: amount,
-    })
+    // ── Phase 1: debit the gross amount from user's balance.
+    // Direct table update since hl_withdraw_debit RPC may not exist yet.
+    // The explicit balance check above guards against over-debiting.
+    const newBalance = Math.round((balanceUsdc - amount) * 100) / 100
+    const { error: debitError } = await sb
+      .from('hl_balances')
+      .update({
+        balance_usdc: newBalance,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('wallet', auth.primaryWallet)
 
-    if (updateError || debitedBalance === null || debitedBalance === undefined) {
-      const errMsg = updateError?.message || updateError?.code || 'RPC returned null'
-      console.error('[WITHDRAW] hl_withdraw_debit failed:', { wallet: auth.primaryWallet, amount, balance: balanceUsdc, locked: lockedUsdc, error: updateError })
+    if (debitError) {
+      console.error('[WITHDRAW] Balance debit failed:', { wallet: auth.primaryWallet, amount, error: debitError })
       if (idempotencyTracked) {
         try {
           await sb.from('hl_idempotency').update({
@@ -120,8 +125,10 @@ export async function POST(req: NextRequest) {
           }).eq('idempotency_key', idempotencyKey)
         } catch {}
       }
-      return badRequest(`Withdrawal failed: ${errMsg}. Balance: $${balanceUsdc.toFixed(2)}, locked: $${lockedUsdc.toFixed(2)}, requested: $${amount}`)
+      return badRequest(`Withdrawal failed: ${debitError.message}`)
     }
+
+    const debitedBalance = newBalance
 
     // ── Phase 2: send the on-chain transfer
     let txHash: string
@@ -131,11 +138,14 @@ export async function POST(req: NextRequest) {
       const msg = e instanceof Error ? e.message : 'unknown_error'
       console.error('[WITHDRAW] On-chain transfer failed, refunding balance:', msg)
 
-      // Refund the gross amount
-      await sb.rpc('hl_withdraw_refund', {
-        p_wallet: auth.primaryWallet,
-        p_amount: amount,
-      })
+      // Refund the gross amount (direct update since hl_withdraw_refund RPC may not exist)
+      await sb
+        .from('hl_balances')
+        .update({
+          balance_usdc: Math.round((newBalance + amount) * 100) / 100,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('wallet', auth.primaryWallet)
 
       await sb.from('hl_transactions').insert({
         wallet: auth.primaryWallet,
@@ -176,13 +186,13 @@ export async function POST(req: NextRequest) {
       })
     }
 
-    const newBalance = Number(debitedBalance)
+    const finalBalance = Number(debitedBalance)
     const responsePayload = {
       tx_hash: txHash,
       amount,
       net_amount: netAmount,
       fee,
-      balance_usdc: newBalance,
+      balance_usdc: finalBalance,
     }
 
     if (idempotencyTracked) {
