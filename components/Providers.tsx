@@ -19,7 +19,6 @@ export default function Providers({ children }: { children: React.ReactNode }) {
         appearance: {
           theme: 'dark',
           accentColor: '#9333ea',
-          logo: '/logo.png',
           showWalletLoginFirst: false,
         },
         defaultChain: base,
