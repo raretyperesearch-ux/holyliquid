@@ -19,17 +19,23 @@ export async function GET(req: NextRequest) {
     const locked_usdc   = Number(data?.locked_usdc ?? 0)
     const available_usdc = balance_usdc - locked_usdc
 
-    // Fetch temp_name. Wrapped so the balance endpoint still works if the
-    // hl_get_temp_name RPC hasn't been deployed yet.
+    // Fetch temp_name + deposit_address from hl_users in one query.
+    // Wrapped so the balance endpoint still works if hl_users doesn't exist yet.
     let temp_name: string | null = null
+    let deposit_address: string | null = null
     try {
-      const { data: nameData } = await sb.rpc('hl_get_temp_name', { p_wallet: wallet })
-      temp_name = (nameData as string | null) ?? null
+      const { data: userRow } = await sb
+        .from('hl_users')
+        .select('temp_name, deposit_address')
+        .eq('wallet', wallet)
+        .maybeSingle()
+      temp_name = userRow?.temp_name ?? null
+      deposit_address = userRow?.deposit_address ?? null
     } catch (e) {
-      console.warn('[BALANCE] hl_get_temp_name failed (RPC may not exist yet):', e)
+      console.warn('[BALANCE] hl_users query failed:', e)
     }
 
-    return ok({ wallet, balance_usdc, locked_usdc, available_usdc, temp_name })
+    return ok({ wallet, balance_usdc, locked_usdc, available_usdc, temp_name, deposit_address })
   } catch (e: any) {
     if (e.message?.includes('token') || e.message?.includes('wallet')) {
       return unauthorized(e.message)
