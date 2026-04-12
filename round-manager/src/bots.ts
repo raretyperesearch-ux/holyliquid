@@ -10,32 +10,51 @@ const BOT_WALLETS = [
   '0xb07a000000000000000000000000000000007004',
 ]
 
-// Bet sizes the bots choose from. Skewed toward small bets.
-const BET_AMOUNTS = [1, 1, 2, 2, 3, 5]
+// Bet sizes — capped at $2 max to limit exposure per round.
+const BET_AMOUNTS = [1, 1, 1, 1, 2, 2]
 
 // Each bot bets on this fraction of rounds (independent per bot).
-const BET_PROBABILITY = 0.65
+const BET_PROBABILITY = 0.45
 
 // Random delay (ms) after a round opens before a bot fires its bet.
-// Spread across the betting window so they don't all bet at the same instant.
-const MIN_DELAY_MS = 1500
-const MAX_DELAY_MS = 7500
+const MIN_DELAY_MS = 2500
+const MAX_DELAY_MS = 8000
 
 // Don't let any bot drop below this balance — they sit out until rebalanced.
 const MIN_BALANCE_FLOOR = 5
 
-// Rebalance bounds. If a bot drifts outside these, it gets nudged back to $200.
+// Rebalance bounds.
 const REBALANCE_LOW  = 10
 const REBALANCE_HIGH = 60
 const REBALANCE_TARGET = 25
+
+// Daily loss cap per wallet. Prevents runaway bleeding against humans.
+const DAILY_LOSS_CAP = 10
+const dailyLosses = new Map<string, { total: number; resetAt: number }>()
+
+function getDailyLoss(wallet: string): number {
+  const entry = dailyLosses.get(wallet)
+  if (!entry || Date.now() > entry.resetAt) {
+    dailyLosses.set(wallet, { total: 0, resetAt: Date.now() + 24 * 60 * 60 * 1000 })
+    return 0
+  }
+  return entry.total
+}
+
+function recordLoss(wallet: string, amount: number) {
+  const entry = dailyLosses.get(wallet)
+  if (entry && Date.now() <= entry.resetAt) {
+    entry.total += amount
+  } else {
+    dailyLosses.set(wallet, { total: amount, resetAt: Date.now() + 24 * 60 * 60 * 1000 })
+  }
+}
 
 const random = <T>(arr: T[]): T => arr[Math.floor(Math.random() * arr.length)]
 const randomInt = (min: number, max: number) => Math.floor(Math.random() * (max - min + 1)) + min
 
 /**
- * Schedule bot bets for a freshly-opened round. Fires bets on a random delay
- * within the betting window so they don't cluster at t=0.
- *
+ * Schedule bot bets for a freshly-opened round.
  * Safe to call even if BOTS_ENABLED is false — it no-ops.
  */
 export function scheduleBotBets(round: Round): void {
@@ -45,7 +64,6 @@ export function scheduleBotBets(round: Round): void {
   const now = Date.now()
   const remainingWindow = bettingClosesAt - now
 
-  // If we're already past the betting window or it's tiny, skip
   if (remainingWindow < MIN_DELAY_MS + 500) {
     console.log(`[Bots] Round #${round.round_number}: betting window too short (${remainingWindow}ms), skipping`)
     return
@@ -53,8 +71,8 @@ export function scheduleBotBets(round: Round): void {
 
   for (const wallet of BOT_WALLETS) {
     if (Math.random() > BET_PROBABILITY) continue
+    if (getDailyLoss(wallet) >= DAILY_LOSS_CAP) continue
 
-    // Cap the delay so we don't bet after the window closes
     const maxDelay = Math.min(MAX_DELAY_MS, remainingWindow - 500)
     const delay = randomInt(MIN_DELAY_MS, maxDelay)
 
@@ -69,7 +87,8 @@ export function scheduleBotBets(round: Round): void {
 async function placeBotBet(wallet: string, round: Round): Promise<void> {
   const sb = getSupabaseClient()
 
-  // Check current balance — sit out if too low
+  if (getDailyLoss(wallet) >= DAILY_LOSS_CAP) return
+
   const { data: bal } = await sb
     .from('hl_balances')
     .select('balance_usdc, locked_usdc')
@@ -85,24 +104,28 @@ async function placeBotBet(wallet: string, round: Round): Promise<void> {
   const amount = Math.min(random(BET_AMOUNTS), Math.floor(available))
   if (amount < 1) return
 
-  // Pick a side. Slight randomness — never always-pos or always-neg per bot.
-  const side: 'pos' | 'neg' = Math.random() < 0.5 ? 'pos' : 'neg'
-
-  // Verify the round is still open (could have locked while we were waiting)
+  // Read live pool split for smart side selection
   const { data: roundCheck } = await sb
     .from('hl_rounds')
-    .select('status, betting_closes_at')
+    .select('status, betting_closes_at, pos_pool, neg_pool')
     .eq('id', round.id)
     .single()
 
-  if (!roundCheck || roundCheck.status !== 'open') {
-    return // round already locked, don't bet
-  }
-  if (new Date(roundCheck.betting_closes_at).getTime() <= Date.now()) {
-    return // betting window expired
+  if (!roundCheck || roundCheck.status !== 'open') return
+  if (new Date(roundCheck.betting_closes_at).getTime() <= Date.now()) return
+
+  // Smart side: bet the minority side 80% of the time to provide liquidity
+  // and give a contrarian edge. 20% random so the pattern isn't predictable.
+  const posPool = Number(roundCheck.pos_pool) || 0
+  const negPool = Number(roundCheck.neg_pool) || 0
+  let side: 'pos' | 'neg'
+  if (posPool === negPool) {
+    side = Math.random() < 0.5 ? 'pos' : 'neg'
+  } else {
+    const minoritySide: 'pos' | 'neg' = posPool < negPool ? 'pos' : 'neg'
+    side = Math.random() < 0.8 ? minoritySide : (minoritySide === 'pos' ? 'neg' : 'pos')
   }
 
-  // Fire the bet via the same RPC real users use
   const { error } = await sb.rpc('hl_place_bet', {
     p_wallet: wallet,
     p_amount: amount,
@@ -112,24 +135,31 @@ async function placeBotBet(wallet: string, round: Round): Promise<void> {
   })
 
   if (error) {
-    // insufficient_balance, one_bet_per_wallet, etc — log but don't crash
     console.log(`[Bots] ${shortWallet(wallet)} bet declined: ${error.message}`)
     return
   }
 
-  console.log(`[Bots] ${shortWallet(wallet)} bet $${amount} on ${side} (round #${round.round_number})`)
+  console.log(`[Bots] ${shortWallet(wallet)} bet $${amount} on ${side} (round #${round.round_number}, pools: +${posPool}/-${negPool})`)
 }
 
 /**
- * Periodically rebalance bot wallets that have drifted too high or too low.
- * Keeps them roughly stable over time without manual intervention.
- *
+ * Called by the settle flow to track bot losses for the daily cap.
+ */
+export function trackBotSettlement(wallet: string, won: boolean, amount: number) {
+  if (!BOT_WALLETS.includes(wallet)) return
+  if (!won) {
+    recordLoss(wallet, amount)
+  }
+}
+
+/**
+ * Periodically rebalance bot wallets.
  * Call once at startup; it self-schedules.
  */
 export function startBotRebalancer(): void {
   if (process.env.BOTS_ENABLED !== 'true') return
 
-  const REBALANCE_INTERVAL_MS = 5 * 60 * 1000 // every 5 minutes
+  const REBALANCE_INTERVAL_MS = 5 * 60 * 1000
 
   const tick = async () => {
     try {
@@ -150,7 +180,6 @@ export function startBotRebalancer(): void {
           console.log(`[Bots] Rebalanced ${shortWallet(row.wallet)}: $${balance.toFixed(2)} → $${REBALANCE_TARGET}`)
         } else if (balance > REBALANCE_HIGH) {
           const skim = balance - REBALANCE_TARGET
-          // Direct UPDATE to skim — no helper for "decrease balance" currently
           await sb.from('hl_balances')
             .update({ balance_usdc: REBALANCE_TARGET, updated_at: new Date().toISOString() })
             .eq('wallet', row.wallet)
@@ -165,7 +194,6 @@ export function startBotRebalancer(): void {
     }
   }
 
-  // Run once on startup, then every interval
   tick()
   setInterval(tick, REBALANCE_INTERVAL_MS)
   console.log('[Bots] Rebalancer started — will tick every 5 minutes')

@@ -2,7 +2,7 @@ import { getSupabaseClient } from './db'
 import { Round } from './types'
 import crypto from 'crypto'
 
-// Liquidity provider wallets — seeded in hl_balances with $200 each.
+// Liquidity provider wallets — seeded in hl_balances with $25 each.
 const LP_WALLETS = [
   '0xf89490b133654ceb096675bd60e0783f595ce00c',
   '0xa445042f03376353fa8f514b04e53d8e6b5f3846',
@@ -10,24 +10,46 @@ const LP_WALLETS = [
   '0xdaaf396675fe6324dce078e20745603d4f198482',
 ]
 
-// Bet sizes the LPs choose from. Skewed toward small bets.
-const BET_AMOUNTS = [1, 1, 2, 2, 3, 5]
+// Bet sizes — capped at $2 max to limit exposure per round.
+const BET_AMOUNTS = [1, 1, 1, 1, 2, 2]
 
 // Each LP bets on this fraction of rounds (independent per wallet).
-const BET_PROBABILITY = 0.65
+const BET_PROBABILITY = 0.45
 
 // Random delay (ms) after a round opens before an LP fires its bet.
-const MIN_DELAY_MS = 1500
-const MAX_DELAY_MS = 7500
+const MIN_DELAY_MS = 2500
+const MAX_DELAY_MS = 8000
 
 // Don't let any wallet drop below this balance — sit out until rebalanced.
 const MIN_BALANCE_FLOOR = 5
 
 // Rebalance bounds. If a wallet drifts outside these, nudge back to $25.
-// Keep LP balances lean — they're phantom (not backed by on-chain USDC).
 const REBALANCE_LOW  = 10
 const REBALANCE_HIGH = 60
 const REBALANCE_TARGET = 25
+
+// Daily loss cap per wallet. If an LP loses more than this in a 24h window,
+// it sits out until the window resets. Prevents runaway bleeding.
+const DAILY_LOSS_CAP = 10
+const dailyLosses = new Map<string, { total: number; resetAt: number }>()
+
+function getDailyLoss(wallet: string): number {
+  const entry = dailyLosses.get(wallet)
+  if (!entry || Date.now() > entry.resetAt) {
+    dailyLosses.set(wallet, { total: 0, resetAt: Date.now() + 24 * 60 * 60 * 1000 })
+    return 0
+  }
+  return entry.total
+}
+
+function recordLoss(wallet: string, amount: number) {
+  const entry = dailyLosses.get(wallet)
+  if (entry && Date.now() <= entry.resetAt) {
+    entry.total += amount
+  } else {
+    dailyLosses.set(wallet, { total: amount, resetAt: Date.now() + 24 * 60 * 60 * 1000 })
+  }
+}
 
 const random = <T>(arr: T[]): T => arr[Math.floor(Math.random() * arr.length)]
 const randomInt = (min: number, max: number) => Math.floor(Math.random() * (max - min + 1)) + min
@@ -53,6 +75,9 @@ export function scheduleLpBets(round: Round): void {
   for (const wallet of LP_WALLETS) {
     if (Math.random() > BET_PROBABILITY) continue
 
+    // Check daily loss cap before even scheduling
+    if (getDailyLoss(wallet) >= DAILY_LOSS_CAP) continue
+
     const maxDelay = Math.min(MAX_DELAY_MS, remainingWindow - 500)
     const delay = randomInt(MIN_DELAY_MS, maxDelay)
 
@@ -66,6 +91,9 @@ export function scheduleLpBets(round: Round): void {
 
 async function placeLpBet(wallet: string, round: Round): Promise<void> {
   const sb = getSupabaseClient()
+
+  // Re-check daily loss cap (could have changed since scheduling)
+  if (getDailyLoss(wallet) >= DAILY_LOSS_CAP) return
 
   const { data: bal } = await sb
     .from('hl_balances')
@@ -82,17 +110,30 @@ async function placeLpBet(wallet: string, round: Round): Promise<void> {
   const amount = Math.min(random(BET_AMOUNTS), Math.floor(available))
   if (amount < 1) return
 
-  const side: 'pos' | 'neg' = Math.random() < 0.5 ? 'pos' : 'neg'
-
-  // Verify the round is still open
+  // Verify the round is still open AND read the live pool split
   const { data: roundCheck } = await sb
     .from('hl_rounds')
-    .select('status, betting_closes_at')
+    .select('status, betting_closes_at, pos_pool, neg_pool')
     .eq('id', round.id)
     .single()
 
   if (!roundCheck || roundCheck.status !== 'open') return
   if (new Date(roundCheck.betting_closes_at).getTime() <= Date.now()) return
+
+  // Smart side selection: bet the MINORITY side to provide liquidity.
+  // If pools are equal or both empty, pick randomly.
+  // This gives a slight contrarian edge and — more importantly — prevents
+  // one-sided rounds from being voided (which wastes everyone's time).
+  const posPool = Number(roundCheck.pos_pool) || 0
+  const negPool = Number(roundCheck.neg_pool) || 0
+  let side: 'pos' | 'neg'
+  if (posPool === negPool) {
+    side = Math.random() < 0.5 ? 'pos' : 'neg'
+  } else {
+    // 80% chance to bet the minority side, 20% random (so it's not 100% predictable)
+    const minoritySide: 'pos' | 'neg' = posPool < negPool ? 'pos' : 'neg'
+    side = Math.random() < 0.8 ? minoritySide : (minoritySide === 'pos' ? 'neg' : 'pos')
+  }
 
   const { error } = await sb.rpc('hl_place_bet', {
     p_wallet: wallet,
@@ -107,7 +148,19 @@ async function placeLpBet(wallet: string, round: Round): Promise<void> {
     return
   }
 
-  console.log(`[LP] ${shortWallet(wallet)} bet $${amount} on ${side} (round #${round.round_number})`)
+  console.log(`[LP] ${shortWallet(wallet)} bet $${amount} on ${side} (round #${round.round_number}, pools: +${posPool}/-${negPool})`)
+}
+
+/**
+ * Called by the settle flow (via round-manager events) to track LP losses.
+ * Non-LPs are ignored. This is a best-effort in-memory tracker — resets
+ * on Railway restart, which is fine (conservative: LPs bet again after restart).
+ */
+export function trackLpSettlement(wallet: string, won: boolean, amount: number) {
+  if (!LP_WALLETS.includes(wallet)) return
+  if (!won) {
+    recordLoss(wallet, amount)
+  }
 }
 
 /**
