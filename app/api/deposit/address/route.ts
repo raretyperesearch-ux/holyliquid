@@ -28,6 +28,7 @@ export async function GET(req: NextRequest) {
       .single()
 
     if (existing?.deposit_address) {
+      await ensureAlchemyAddressRegistration(existing.deposit_address, wallet)
       return ok({
         deposit_address: existing.deposit_address,
         temp_name: existing.temp_name,
@@ -62,14 +63,10 @@ export async function GET(req: NextRequest) {
       return serverError(new Error('Failed to store deposit address'))
     }
 
-    // Register the new deposit address with the Alchemy webhook so incoming
-    // USDC transfers trigger POST /api/deposit/webhook. Non-fatal if this
-    // fails — an admin job can re-register later.
-    try {
-      await addAddressToAlchemyWebhook(address)
-    } catch (e) {
-      console.error('[DEPOSIT ADDR] Failed to register with Alchemy:', e)
-    }
+    // Register the address with the Alchemy webhook so incoming USDC transfers
+    // trigger POST /api/deposit/webhook. Fail loudly here so we do not return
+    // unwatched deposit addresses to users.
+    await ensureAlchemyAddressRegistration(address, wallet)
 
     // Re-fetch so we can include temp_name (which the assign RPC may have generated)
     const { data: refreshed } = await sb
@@ -85,10 +82,26 @@ export async function GET(req: NextRequest) {
       token: 'USDC',
       token_contract: '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913',
     })
-  } catch (e: any) {
-    if (e?.message?.includes('token') || e?.message?.includes('wallet')) {
-      return badRequest(e.message)
+  } catch (e: unknown) {
+    const message = e instanceof Error ? e.message : String(e)
+    if (message.includes('token') || message.includes('wallet')) {
+      return badRequest(message)
     }
     return serverError(e)
+  }
+}
+
+async function ensureAlchemyAddressRegistration(address: string, wallet: string) {
+  try {
+    await addAddressToAlchemyWebhook(address)
+  } catch (error) {
+    console.error('[DEPOSIT ADDR] Alchemy registration failed', {
+      wallet,
+      address,
+      error,
+    })
+    throw new Error(
+      'Failed to register your deposit address for webhook monitoring. Please retry in a moment.'
+    )
   }
 }
