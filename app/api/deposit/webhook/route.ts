@@ -140,10 +140,11 @@ async function performSweep(
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e)
     console.error('[SWEEP] Failed:', msg)
+    // Leave status as 'pending' (NOT 'failed') so the Railway safety-net
+    // worker in round-manager/src/depositSweeper.ts can retry on its next tick.
     await sb
       .from('hl_deposit_sweeps')
       .update({
-        status: 'failed',
         error: msg.slice(0, 500),
       })
       .eq('deposit_tx_hash', depositTxHash)
