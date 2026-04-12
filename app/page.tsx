@@ -7,6 +7,7 @@ import { usePrivy } from '@privy-io/react-auth'
 import { useRound, type LastResult } from '@/hooks/useRound'
 import { LiveTicker } from './components/LiveTicker'
 import { DiscordButton } from './components/DiscordButton'
+import { PythBadge } from './components/PythBadge'
 import { SoundToggle } from './components/SoundToggle'
 import { sounds } from '../lib/sounds'
 
@@ -757,6 +758,7 @@ export default function HolyLiquid() {
     <div className="hl-root">
       <LiveTicker />
       <DiscordButton />
+      <PythBadge />
 
       {/* ── SCENE — contains chart + UI in an isolated stacking context ── */}
       <div
