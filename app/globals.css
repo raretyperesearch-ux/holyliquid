@@ -1911,3 +1911,48 @@ html, body, #__next { width: 100%; min-height: 100%; }
   border-color: rgba(125,242,168,0.5) !important;
 }
 
+/* ── PYTH VERIFICATION BADGE ─────────────────────────────── */
+.pyth-badge {
+  position: fixed;
+  left: 58px;
+  bottom: 16px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 5px 10px 5px 7px;
+  border-radius: 20px;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  color: rgba(255, 255, 255, 0.55);
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-decoration: none;
+  z-index: 50;
+  transition: all 0.2s ease;
+  white-space: nowrap;
+  animation: discordFabIn 0.5s cubic-bezier(.34, 1.56, .64, 1) 0.6s both;
+}
+.pyth-badge:hover {
+  background: rgba(255, 255, 255, 0.1);
+  color: rgba(255, 255, 255, 0.9);
+  border-color: rgba(255, 255, 255, 0.2);
+}
+.pyth-badge svg {
+  color: #7df2a8;
+  flex-shrink: 0;
+}
+
+@media (min-width: 1024px) {
+  .pyth-badge {
+    left: 74px;
+    bottom: 26px;
+    font-size: 10px;
+    padding: 6px 12px 6px 9px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .pyth-badge { animation: none; }
+}
+
