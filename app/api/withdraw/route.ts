@@ -110,7 +110,8 @@ export async function POST(req: NextRequest) {
     })
 
     if (updateError || debitedBalance === null || debitedBalance === undefined) {
-      console.error('[WITHDRAW] hl_withdraw_debit failed:', { wallet: auth.primaryWallet, amount, error: updateError })
+      const errMsg = updateError?.message || updateError?.code || 'RPC returned null'
+      console.error('[WITHDRAW] hl_withdraw_debit failed:', { wallet: auth.primaryWallet, amount, balance: balanceUsdc, locked: lockedUsdc, error: updateError })
       if (idempotencyTracked) {
         try {
           await sb.from('hl_idempotency').update({
@@ -119,7 +120,7 @@ export async function POST(req: NextRequest) {
           }).eq('idempotency_key', idempotencyKey)
         } catch {}
       }
-      return badRequest('Withdrawal failed — please try again')
+      return badRequest(`Withdrawal failed: ${errMsg}. Balance: $${balanceUsdc.toFixed(2)}, locked: $${lockedUsdc.toFixed(2)}, requested: $${amount}`)
     }
 
     // ── Phase 2: send the on-chain transfer
