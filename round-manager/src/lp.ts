@@ -105,9 +105,6 @@ async function placeLpBet(wallet: string, round: Round): Promise<void> {
     return
   }
 
-  const amount = Math.min(random(BET_AMOUNTS), Math.floor(available))
-  if (amount < 1) return
-
   const { data: roundCheck } = await sb
     .from('hl_rounds')
     .select('status, betting_closes_at, pos_pool, neg_pool')
@@ -117,16 +114,38 @@ async function placeLpBet(wallet: string, round: Round): Promise<void> {
   if (!roundCheck || roundCheck.status !== 'open') return
   if (new Date(roundCheck.betting_closes_at).getTime() <= Date.now()) return
 
-  // Smart side: bet the minority side 80% of the time
+  // POOL BALANCING — this is the core arbitrage fix.
+  // If the pool is lopsided, humans can bet the minority side for outsized
+  // parimutuel payouts. LPs must actively balance by:
+  //   a) ALWAYS betting the minority side (no 20% random fallback)
+  //   b) Scaling bet size up proportional to the imbalance
   const posPool = Number(roundCheck.pos_pool) || 0
   const negPool = Number(roundCheck.neg_pool) || 0
+  const imbalance = Math.abs(posPool - negPool)
+
   let side: 'pos' | 'neg'
+  let amount: number
+
   if (posPool === negPool) {
+    // Balanced — random side, small bet
     side = Math.random() < 0.5 ? 'pos' : 'neg'
+    amount = Math.min(random(BET_AMOUNTS), Math.floor(available))
   } else {
-    const minoritySide: 'pos' | 'neg' = posPool < negPool ? 'pos' : 'neg'
-    side = Math.random() < 0.8 ? minoritySide : (minoritySide === 'pos' ? 'neg' : 'pos')
+    // Lopsided — always bet minority, scale bet size with imbalance
+    side = posPool < negPool ? 'pos' : 'neg'
+    if (imbalance >= 10) {
+      // Heavily lopsided — bet up to $5 to meaningfully balance
+      amount = Math.min(5, Math.floor(available))
+    } else if (imbalance >= 5) {
+      // Moderately lopsided — bet $3
+      amount = Math.min(3, Math.floor(available))
+    } else {
+      // Slightly lopsided — normal small bet
+      amount = Math.min(random(BET_AMOUNTS), Math.floor(available))
+    }
   }
+
+  if (amount < 1) return
 
   const { error } = await sb.rpc('hl_place_bet', {
     p_wallet: wallet,
