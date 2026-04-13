@@ -39,8 +39,10 @@ const MM_LIFETIME_TOPUP_CAP = Number(process.env.MM_LIFETIME_TOPUP_CAP) || 100
 const MM_TOPUPS_ENABLED     = process.env.MM_TOPUPS_ENABLED !== 'false'
 
 function enabled(): boolean {
-  // Defaults to enabled. Flip MM_ENABLED=false on Railway to kill.
-  return process.env.MM_ENABLED !== 'false'
+  // OPT-IN: disabled by default. Set MM_ENABLED=true on Railway to activate.
+  // Kept off-by-default so a fresh deploy never starts burning money without
+  // explicit opt-in. Flip it when you're ready to let the MM run.
+  return process.env.MM_ENABLED === 'true'
 }
 
 function short(): string {
