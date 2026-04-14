@@ -3,6 +3,15 @@ from datetime import datetime, timezone
 import asyncio
 
 PAIRS = ["ETH/USD", "BTC/USD", "SOL/USD"]
+
+# Force a reconnect if no price update arrives within this many ms. Set well
+# above the consumer's freshness limit so transient hiccups don't churn the
+# socket, but low enough that a silently-dead feed recovers in well under a
+# minute.
+WATCHDOG_STALE_MS = 15_000
+WATCHDOG_CHECK_INTERVAL_S = 2.0
+WATCHDOG_GRACE_S = 10.0
+
 cache: dict = {}
 _last_update_ms: int = 0
 _connected: bool = False
@@ -103,9 +112,46 @@ def ws_close_handler(e):
     _connected = False
     print(f"[Oracle] WebSocket closed: {e}")
 
-async def start_feed():
-    global _connected
+async def _staleness_watchdog():
+    """Return once price updates have gone stale, so the caller can reconnect.
+
+    The Avantis FeedClient's `on_close` / `on_error` callbacks just set a flag —
+    they don't actually break out of `listen_for_price_updates()`. If the
+    websocket silently dies (no exception, no close frame), the listen task
+    blocks forever and prices stay frozen. This watchdog races the listen task
+    so we can force a reconnect when the handler stops firing.
+    """
+    # Give the feed a chance to deliver the first updates before we start
+    # measuring staleness — otherwise we'd reconnect immediately on startup.
+    await asyncio.sleep(WATCHDOG_GRACE_S)
     while True:
+        await asyncio.sleep(WATCHDOG_CHECK_INTERVAL_S)
+        if _last_update_ms == 0:
+            # Nothing has ever arrived; treat the grace period as our deadline.
+            print("[Oracle] Watchdog: no price updates since startup — reconnecting")
+            return
+        now_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
+        age_ms = now_ms - _last_update_ms
+        if age_ms > WATCHDOG_STALE_MS:
+            print(f"[Oracle] Watchdog: no price updates for {age_ms}ms — reconnecting")
+            return
+
+
+async def _cancel_and_wait(task: asyncio.Task):
+    if task.done():
+        return
+    task.cancel()
+    try:
+        await task
+    except (asyncio.CancelledError, Exception):
+        pass
+
+
+async def start_feed():
+    global _connected, _last_update_ms
+    while True:
+        listen_task = None
+        watchdog_task = None
         try:
             print("[Oracle] Connecting to Pyth price feed...")
             client = FeedClient(
@@ -115,8 +161,33 @@ async def start_feed():
             for pair in PAIRS:
                 client.register_price_feed_callback(pair, make_handler(pair))
             print(f"[Oracle] Subscribed to: {', '.join(PAIRS)}")
-            await client.listen_for_price_updates()
+
+            # Reset the staleness clock for this connection attempt so the
+            # watchdog measures freshness relative to the new socket.
+            _last_update_ms = 0
+
+            listen_task = asyncio.create_task(client.listen_for_price_updates())
+            watchdog_task = asyncio.create_task(_staleness_watchdog())
+
+            done, _pending = await asyncio.wait(
+                {listen_task, watchdog_task},
+                return_when=asyncio.FIRST_COMPLETED,
+            )
+
+            # Surface any exception from whichever task finished first.
+            for t in done:
+                if t.cancelled():
+                    continue
+                exc = t.exception()
+                if exc is not None:
+                    print(f"[Oracle] Feed task ended with error: {exc}")
         except Exception as e:
+            print(f"[Oracle] Feed error: {e}")
+        finally:
             _connected = False
-            print(f"[Oracle] Feed error: {e}. Reconnecting in 3s...")
+            if listen_task is not None:
+                await _cancel_and_wait(listen_task)
+            if watchdog_task is not None:
+                await _cancel_and_wait(watchdog_task)
+            print("[Oracle] Reconnecting in 3s...")
             await asyncio.sleep(3)
